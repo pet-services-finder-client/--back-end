@@ -12,6 +12,8 @@ from src.core.security import (
 )
 from src.models.user import User
 from src.schemas.user import Token, UserCreate, UserRead
+from typing import Annotated
+from src.core.deps import get_current_active_user
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -72,3 +74,10 @@ async def login(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
     )
+
+@router.get("/me", response_model=UserRead)
+async def read_current_user(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    """Return the profile of the currently authenticated user."""
+    return current_user
