@@ -18,7 +18,7 @@ uvicorn==0.45.0
 asyncpg
 alembic
 geoalchemy2
-passlib[bcrypt]
+bcrypt
 python-jose[cryptography]
 python-multipart
 email-validator
