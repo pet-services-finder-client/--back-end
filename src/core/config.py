@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import List
  
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
  
  
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
  
     # Application
-    APP_NAME: str = "PetServices"
+    APP_NAME: str = "Pawly"
     APP_ENV: str = "development"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
@@ -30,21 +30,22 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
  
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list)
- 
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    @classmethod
-    def assemble_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        if isinstance(v, list):
-            return v
-        return []
- 
- 
+    BACKEND_CORS_ORIGINS_RAW: str = ""
+
+    @property
+    def BACKEND_CORS_ORIGINS(self) -> List[str]:
+        if not self.BACKEND_CORS_ORIGINS_RAW:
+            return []
+        return [
+            origin.strip()
+            for origin in self.BACKEND_CORS_ORIGINS_RAW.split(",")
+            if origin.strip()
+        ]
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
- 
- 
+
+
 settings = get_settings()
