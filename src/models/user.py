@@ -1,8 +1,13 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
+
 from sqlalchemy import String, Boolean, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.database import Base
+
+if TYPE_CHECKING:
+     from src.models.pet import Pet
 
 
 class User(Base):
