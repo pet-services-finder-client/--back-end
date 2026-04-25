@@ -31,3 +31,9 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # Relationship. back to the pets
+    pets: Mapped[list["Pet"]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
