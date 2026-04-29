@@ -56,3 +56,14 @@ async def get_current_active_user(
             detail="User account is inactive",
         )
     return current_user
+
+async def get_current_admin_user(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    """Reject the request if the authenticated user is not an admin."""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return current_user
