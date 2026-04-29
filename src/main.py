@@ -2,9 +2,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqladmin import Admin
+from starlette.middleware.sessions import SessionMiddleware
 
+from src.admin.auth import AdminAuth
 from src.api.v1.router import api_router
 from src.core.config import settings
+from src.core.database import engine
 
 
 @asynccontextmanager
@@ -23,6 +27,8 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Required by sqladmin to store login state in a cookie
+app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(
@@ -48,3 +54,12 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+admin = Admin(
+    app,
+    engine,
+    authentication_backend=AdminAuth(secret_key=settings.SECRET_KEY),
+    base_url="/admin",
+    title="Pawly Admin",
+)
