@@ -63,3 +63,9 @@ admin = Admin(
     base_url="/admin",
     title="Pawly Admin",
 )
+
+# Register admin views
+##deliberately at the end, rather than at the top of the file. Why: to avoid circular imports.
+from src.admin.views import AnimalTypeAdmin,UserAdmin 
+admin.add_view(UserAdmin)
+admin.add_view(AnimalTypeAdmin)
