@@ -21,8 +21,9 @@ class UserRead(UserBase):
     id: int
     is_active: bool
     is_verified: bool
+    is_admin: bool
     created_at: datetime
-
+    
 
 class Token(BaseModel):
     """JWT tokens returned after successful login."""
