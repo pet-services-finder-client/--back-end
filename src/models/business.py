@@ -21,6 +21,7 @@ from src.models.associations import business_animal_types, business_services
 if TYPE_CHECKING:
     from src.models.animal_type import AnimalType
     from src.models.business_category import BusinessCategory
+    from src.models.business_hours import BusinessHours
     from src.models.service import Service
     from src.models.user import User
 
@@ -105,4 +106,10 @@ class Business(Base):
     services: Mapped[list["Service"]] = relationship(
         secondary=business_services,
         lazy="selectin",
+    )
+
+    hours: Mapped[list["BusinessHours"]] = relationship(
+        back_populates="business",
+        cascade="all, delete-orphan",
+        order_by="BusinessHours.day_of_week",
     )
