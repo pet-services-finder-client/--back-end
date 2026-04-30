@@ -16,9 +16,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.database import Base
 from src.models.enums import BusinessStatus
+from src.models.associations import business_animal_types, business_services
 
 if TYPE_CHECKING:
+    from src.models.animal_type import AnimalType
     from src.models.business_category import BusinessCategory
+    from src.models.service import Service
     from src.models.user import User
 
 
@@ -95,3 +98,11 @@ class Business(Base):
     # Relationships (ORM)
     category: Mapped["BusinessCategory"] = relationship(lazy="joined")
     owner: Mapped["User"] = relationship(back_populates="businesses")
+    animal_types: Mapped[list["AnimalType"]] = relationship(
+        secondary=business_animal_types,
+        lazy="selectin",
+    )
+    services: Mapped[list["Service"]] = relationship(
+        secondary=business_services,
+        lazy="selectin",
+    )
