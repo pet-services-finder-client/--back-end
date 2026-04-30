@@ -7,7 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.database import Base
 
 if TYPE_CHECKING:
-     from src.models.pet import Pet
+    from src.models.business import Business
+    from src.models.pet import Pet
 
 
 class User(Base):
@@ -33,8 +34,12 @@ class User(Base):
         nullable=False,
     )
 
-    # Relationship. back to the pets
+    # Relationships
     pets: Mapped[list["Pet"]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+    businesses: Mapped[list["Business"]] = relationship(
         back_populates="owner",
         cascade="all, delete-orphan",
     )
