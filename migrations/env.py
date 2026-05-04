@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from src.core.config import settings
 from src.core.database import Base
-from src.models import animal_type, associations, business, business_category, business_hours, pet, service, user  # noqa: F401
+from src.models import *  # noqa: F401, F403
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
