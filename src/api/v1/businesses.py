@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from src.core.database import get_db
 from src.models.business import Business
+from src.models.associations import business_animal_types, business_services
 from src.models.enums import BusinessStatus
 from src.schemas.business import BusinessRead
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
@@ -32,12 +33,20 @@ async def list_businesses(
         bool | None,
         Query(description="Filter to only 24/7 emergency businesses"),
     ] = None,
+    animal_type_id: Annotated[
+        int | None,
+        Query(description="Filter by animal type served"),
+    ] = None,
+    service_id: Annotated[
+        int | None,
+        Query(description="Filter by service offered"),
+    ] = None,
 ) -> BusinessListResponse:
     """Return paginated list of approved businesses with optional filters."""
     # Start with the base filter — only approved businesses are public
     filters = [Business.status == BusinessStatus.APPROVED]
 
-    # Add optional filters one by one
+    # Add simple field filters
     if category_id is not None:
         filters.append(Business.category_id == category_id)
     if accepts_emergencies is not None:
@@ -45,15 +54,33 @@ async def list_businesses(
     if emergency_24_7 is not None:
         filters.append(Business.emergency_24_7 == emergency_24_7)
 
+    # Build the base statement (used for both count and items)
+    base_stmt = select(Business).where(*filters)
+
+    # Add many-to-many filters via JOINs
+    if animal_type_id is not None:
+        base_stmt = base_stmt.join(
+            business_animal_types,
+            Business.id == business_animal_types.c.business_id,
+        ).where(business_animal_types.c.animal_type_id == animal_type_id)
+    if service_id is not None:
+        base_stmt = base_stmt.join(
+            business_services,
+            Business.id == business_services.c.business_id,
+        ).where(business_services.c.service_id == service_id)
+
+    # If we joined m:n tables, results may have duplicates — deduplicate
+    if animal_type_id is not None or service_id is not None:
+        base_stmt = base_stmt.distinct()
+
     # Count total matching records (for pagination metadata)
-    count_stmt = select(func.count()).select_from(Business).where(*filters)
+    count_stmt = select(func.count()).select_from(base_stmt.subquery())
     total_result = await db.execute(count_stmt)
     total = total_result.scalar_one()
 
     # Fetch the actual page of records
     items_stmt = (
-        select(Business)
-        .where(*filters)
+        base_stmt
         .order_by(Business.created_at.desc())
         .limit(limit)
         .offset(offset)
