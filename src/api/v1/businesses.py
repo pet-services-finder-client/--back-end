@@ -1,7 +1,9 @@
 from typing import Annotated
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,6 +11,7 @@ from src.core.database import get_db
 from src.models.business import Business
 from src.models.associations import business_animal_types, business_services
 from src.models.enums import BusinessStatus
+from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
 
@@ -57,6 +60,10 @@ async def list_businesses(
         str | None,
         Query(min_length=1, max_length=100, description="Text search in name and description"),
     ] = None,
+    open_now: Annotated[
+        bool | None,
+        Query(description="Filter to businesses currently open (Kyiv time)"),
+    ] = None,
 ) -> BusinessListResponse:
     """Return paginated list of approved businesses with optional filters."""
     # Geo parameters must come together — either all three or none
@@ -89,7 +96,6 @@ async def list_businesses(
         )
 
     # Geo filter — Haversine formula for distance in kilometers
-    # Earth radius ≈ 6371 km
     if lat is not None and lon is not None and radius_km is not None:
         distance_km = 6371 * func.acos(
             func.cos(func.radians(lat))
@@ -99,7 +105,7 @@ async def list_businesses(
         )
         filters.append(distance_km <= radius_km)
 
-    # Build the base statement (used for both count and items)
+    # Build the base statement
     base_stmt = select(Business).where(*filters)
 
     # Add many-to-many filters via JOINs
@@ -114,8 +120,56 @@ async def list_businesses(
             Business.id == business_services.c.business_id,
         ).where(business_services.c.service_id == service_id)
 
-    # If we joined m:n tables, results may have duplicates — deduplicate
-    if animal_type_id is not None or service_id is not None:
+    # "Open now" filter — check current time against business_hours
+    if open_now:
+        # Use Kyiv timezone for "now" — all our businesses are in Ukraine
+        kyiv_now = datetime.now(ZoneInfo("Europe/Kyiv"))
+        today_weekday = kyiv_now.weekday()
+        today_time = kyiv_now.time()
+
+        # For night-shift hours that span midnight (e.g. 19:00-03:00),
+        # we also need to check yesterday's record with carryover.
+        yesterday = kyiv_now - timedelta(days=1)
+        yesterday_weekday = yesterday.weekday()
+
+        # Today's record matches if: not closed AND (24h OR currently within hours)
+        today_open = and_(
+            BusinessHours.day_of_week == today_weekday,
+            BusinessHours.is_closed.is_(False),
+            or_(
+                BusinessHours.is_24h.is_(True),
+                # Normal hours (open <= close): open <= now <= close
+                and_(
+                    BusinessHours.open_time <= BusinessHours.close_time,
+                    BusinessHours.open_time <= today_time,
+                    BusinessHours.close_time >= today_time,
+                ),
+                # Night hours (open > close): now is after open OR before close
+                and_(
+                    BusinessHours.open_time > BusinessHours.close_time,
+                    or_(
+                        BusinessHours.open_time <= today_time,
+                        BusinessHours.close_time >= today_time,
+                    ),
+                ),
+            ),
+        )
+
+        # Yesterday's night-shift carryover: open > close, and now is before close
+        yesterday_carryover = and_(
+            BusinessHours.day_of_week == yesterday_weekday,
+            BusinessHours.is_closed.is_(False),
+            BusinessHours.is_24h.is_(False),
+            BusinessHours.open_time > BusinessHours.close_time,
+            BusinessHours.close_time >= today_time,
+        )
+
+        base_stmt = base_stmt.join(
+            BusinessHours, BusinessHours.business_id == Business.id
+        ).where(or_(today_open, yesterday_carryover))
+
+    # If we joined m:n tables OR business_hours, results may have duplicates
+    if animal_type_id is not None or service_id is not None or open_now:
         base_stmt = base_stmt.distinct()
 
     # Count total matching records (for pagination metadata)
