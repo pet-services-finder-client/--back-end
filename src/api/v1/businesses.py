@@ -475,6 +475,38 @@ async def update_business(
     )
     return result.scalar_one()
 
+@router.delete("/{business_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_business(
+    business_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> None:
+    """Delete a business owned by the current user.
+
+    Only allowed while status is 'pending'. After approval, contact admin.
+    """
+    result = await db.execute(
+        select(Business).where(Business.id == business_id)
+    )
+    business = result.scalar_one_or_none()
+
+    # 404 for both "doesn't exist" and "not yours"
+    if business is None or business.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    # Approved/rejected businesses cannot be deleted by the owner
+    if business.status != BusinessStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approved or rejected businesses cannot be deleted by the owner. Contact admin.",
+        )
+
+    await db.delete(business)
+    await db.commit()
+
 
 @router.get("/{business_id}", response_model=BusinessRead)
 async def get_business(
