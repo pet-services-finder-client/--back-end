@@ -271,7 +271,7 @@ Copy `.env.example` to `.env` and adjust:
 
 (none currently)
 
-### 📋 Backlog
+### Backlog
 
 - **Business Phase 3** — user-submitted business proposals (POST/PATCH/DELETE) with admin moderation
 - **Business Phase 4** — CSV import script for real data from analyst
