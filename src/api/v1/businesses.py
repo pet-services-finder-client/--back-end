@@ -8,12 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.database import get_db
+from src.models.animal_type import AnimalType
 from src.models.business import Business
 from src.models.associations import business_animal_types, business_services
+from src.models.business_category import BusinessCategory
+from src.schemas.business_create import BusinessCreate
 from src.models.enums import BusinessStatus
 from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
+from src.core.deps import get_current_active_user
+from src.core.slug import generate_unique_business_slug
+from src.models.service import Service
+from src.models.user import User
 
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
@@ -193,6 +200,135 @@ async def list_businesses(
         limit=limit,
         offset=offset,
     )
+
+@router.post(
+    "",
+    response_model=BusinessRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_business(
+    payload: BusinessCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Business:
+    """Submit a new business proposal. Status starts as 'pending' for moderation."""
+    # 1. Validate category exists and is active
+    category_result = await db.execute(
+        select(BusinessCategory).where(
+            BusinessCategory.id == payload.category_id,
+            BusinessCategory.is_active.is_(True),
+        )
+    )
+    category = category_result.scalar_one_or_none()
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid or inactive category_id: {payload.category_id}",
+        )
+
+    # 2. Validate animal_type_ids — all must exist and be active
+    animal_types_result = await db.execute(
+        select(AnimalType).where(
+            AnimalType.id.in_(payload.animal_type_ids),
+            AnimalType.is_active.is_(True),
+        )
+    )
+    animal_types = list(animal_types_result.scalars().all())
+    if len(animal_types) != len(set(payload.animal_type_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more animal_type_ids are invalid or inactive",
+        )
+
+    # 3. Validate service_ids — must exist, be active, AND belong to chosen category
+    services: list[Service] = []
+    if payload.service_ids:
+        services_result = await db.execute(
+            select(Service).where(
+                Service.id.in_(payload.service_ids),
+                Service.is_active.is_(True),
+            )
+        )
+        services = list(services_result.scalars().all())
+        if len(services) != len(set(payload.service_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more service_ids are invalid or inactive",
+            )
+        # Each service must belong to the chosen category
+        wrong_category_services = [
+            s.slug for s in services if s.category_id != payload.category_id
+        ]
+        if wrong_category_services:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Services do not belong to the selected category: "
+                    f"{', '.join(wrong_category_services)}"
+                ),
+            )
+
+    # 4. Generate a unique slug from the name
+    slug = await generate_unique_business_slug(db, payload.name)
+
+    # 5. Create the Business record
+    business = Business(
+        name=payload.name,
+        slug=slug,
+        description=payload.description,
+        category_id=payload.category_id,
+        owner_id=current_user.id,
+        status=BusinessStatus.PENDING,
+        address=payload.address,
+        city=payload.city,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        phone=payload.phone,
+        website=payload.website,
+        email=payload.email,
+        accepts_emergencies=payload.accepts_emergencies,
+        emergency_24_7=payload.emergency_24_7,
+        cover_image_url=payload.cover_image_url,
+    )
+
+    # 6. Attach animal_types and services via ORM relationships
+    business.animal_types = animal_types
+    business.services = services
+
+    # 7. Attach hours
+    business.hours = [
+        BusinessHours(
+            day_of_week=h.day_of_week,
+            is_closed=h.is_closed,
+            is_24h=h.is_24h,
+            open_time=h.open_time,
+            close_time=h.close_time,
+        )
+        for h in payload.hours
+    ]
+
+    db.add(business)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create business",
+        )
+
+    # 8. Reload with all relationships for the response
+    result = await db.execute(
+        select(Business)
+        .where(Business.id == business.id)
+        .options(
+            selectinload(Business.animal_types),
+            selectinload(Business.services),
+            selectinload(Business.hours),
+            selectinload(Business.owner),
+        )
+    )
+    return result.scalar_one()
 
 
 @router.get("/{business_id}", response_model=BusinessRead)
