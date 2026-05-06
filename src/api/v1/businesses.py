@@ -13,6 +13,7 @@ from src.models.business import Business
 from src.models.associations import business_animal_types, business_services
 from src.models.business_category import BusinessCategory
 from src.schemas.business_create import BusinessCreate
+from src.schemas.business_update import BusinessUpdate
 from src.models.enums import BusinessStatus
 from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
@@ -318,6 +319,150 @@ async def create_business(
         )
 
     # 8. Reload with all relationships for the response
+    result = await db.execute(
+        select(Business)
+        .where(Business.id == business.id)
+        .options(
+            selectinload(Business.animal_types),
+            selectinload(Business.services),
+            selectinload(Business.hours),
+            selectinload(Business.owner),
+        )
+    )
+    return result.scalar_one()
+
+@router.patch("/{business_id}", response_model=BusinessRead)
+async def update_business(
+    business_id: int,
+    payload: BusinessUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Business:
+    """Update a business owned by the current user.
+
+    Only allowed while status is 'pending' — once approved, edits go through admin.
+    """
+    # 1. Load the business with relationships we may need to modify
+    result = await db.execute(
+        select(Business)
+        .where(Business.id == business_id)
+        .options(
+            selectinload(Business.animal_types),
+            selectinload(Business.services),
+            selectinload(Business.hours),
+        )
+    )
+    business = result.scalar_one_or_none()
+
+    # 2. 404 for both "doesn't exist" and "not yours" (anti-enumeration)
+    if business is None or business.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    # 3. After approval, only admin can edit
+    if business.status != BusinessStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approved or rejected businesses cannot be edited by the owner. Contact admin.",
+        )
+
+    # Get only fields the user actually sent
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # 4. Validate category if changing
+    if "category_id" in update_data:
+        cat_result = await db.execute(
+            select(BusinessCategory).where(
+                BusinessCategory.id == update_data["category_id"],
+                BusinessCategory.is_active.is_(True),
+            )
+        )
+        if cat_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid or inactive category_id: {update_data['category_id']}",
+            )
+
+    # 5. Validate animal_type_ids if provided
+    if "animal_type_ids" in update_data:
+        ids = update_data.pop("animal_type_ids")
+        at_result = await db.execute(
+            select(AnimalType).where(
+                AnimalType.id.in_(ids),
+                AnimalType.is_active.is_(True),
+            )
+        )
+        animal_types = list(at_result.scalars().all())
+        if len(animal_types) != len(set(ids)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more animal_type_ids are invalid or inactive",
+            )
+        business.animal_types = animal_types
+
+    # 6. Validate service_ids if provided
+    if "service_ids" in update_data:
+        ids = update_data.pop("service_ids")
+        # Determine which category to validate against (new or existing)
+        target_category_id = update_data.get("category_id", business.category_id)
+
+        services: list[Service] = []
+        if ids:
+            sv_result = await db.execute(
+                select(Service).where(
+                    Service.id.in_(ids),
+                    Service.is_active.is_(True),
+                )
+            )
+            services = list(sv_result.scalars().all())
+            if len(services) != len(set(ids)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="One or more service_ids are invalid or inactive",
+                )
+            wrong = [s.slug for s in services if s.category_id != target_category_id]
+            if wrong:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Services do not belong to the selected category: {', '.join(wrong)}",
+                )
+        business.services = services
+
+    # 7. Replace hours if provided (delete old, create new)
+    if "hours" in update_data:
+        new_hours = update_data.pop("hours")
+        business.hours = [
+            BusinessHours(
+                day_of_week=h["day_of_week"],
+                is_closed=h["is_closed"],
+                is_24h=h["is_24h"],
+                open_time=h["open_time"],
+                close_time=h["close_time"],
+            )
+            for h in new_hours
+        ]
+
+    # 8. Regenerate slug if name changed
+    if "name" in update_data and update_data["name"] != business.name:
+        update_data["slug"] = await generate_unique_business_slug(db, update_data["name"])
+
+    # 9. Apply remaining simple-field updates
+    for field, value in update_data.items():
+        setattr(business, field, value)
+
+    # 10. Commit transaction
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update business",
+        )
+
+    # 11. Reload with all relationships for the response
     result = await db.execute(
         select(Business)
         .where(Business.id == business.id)
