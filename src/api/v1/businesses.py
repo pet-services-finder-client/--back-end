@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -41,8 +41,32 @@ async def list_businesses(
         int | None,
         Query(description="Filter by service offered"),
     ] = None,
+    lat: Annotated[
+        float | None,
+        Query(ge=-90, le=90, description="Latitude of search center"),
+    ] = None,
+    lon: Annotated[
+        float | None,
+        Query(ge=-180, le=180, description="Longitude of search center"),
+    ] = None,
+    radius_km: Annotated[
+        float | None,
+        Query(gt=0, le=200, description="Search radius in kilometers"),
+    ] = None,
+    q: Annotated[
+        str | None,
+        Query(min_length=1, max_length=100, description="Text search in name and description"),
+    ] = None,
 ) -> BusinessListResponse:
     """Return paginated list of approved businesses with optional filters."""
+    # Geo parameters must come together — either all three or none
+    geo_params = [lat, lon, radius_km]
+    if any(p is not None for p in geo_params) and not all(p is not None for p in geo_params):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="lat, lon, and radius_km must all be provided together",
+        )
+
     # Start with the base filter — only approved businesses are public
     filters = [Business.status == BusinessStatus.APPROVED]
 
@@ -53,6 +77,27 @@ async def list_businesses(
         filters.append(Business.accepts_emergencies == accepts_emergencies)
     if emergency_24_7 is not None:
         filters.append(Business.emergency_24_7 == emergency_24_7)
+
+    # Text search — case-insensitive match in name or description
+    if q is not None:
+        pattern = f"%{q}%"
+        filters.append(
+            or_(
+                Business.name.ilike(pattern),
+                Business.description.ilike(pattern),
+            )
+        )
+
+    # Geo filter — Haversine formula for distance in kilometers
+    # Earth radius ≈ 6371 km
+    if lat is not None and lon is not None and radius_km is not None:
+        distance_km = 6371 * func.acos(
+            func.cos(func.radians(lat))
+            * func.cos(func.radians(Business.latitude))
+            * func.cos(func.radians(Business.longitude) - func.radians(lon))
+            + func.sin(func.radians(lat)) * func.sin(func.radians(Business.latitude))
+        )
+        filters.append(distance_km <= radius_km)
 
     # Build the base statement (used for both count and items)
     base_stmt = select(Business).where(*filters)
