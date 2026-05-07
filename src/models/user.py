@@ -43,3 +43,6 @@ class User(Base):
         back_populates="owner",
         cascade="all, delete-orphan",
     )
+
+    def __str__(self) -> str:
+        return self.full_name if self.full_name else self.email

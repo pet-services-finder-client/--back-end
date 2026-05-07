@@ -38,3 +38,6 @@ class Service(Base):
 
     # Relationship
     category: Mapped["BusinessCategory"] = relationship(lazy="joined")
+
+    def __str__(self) -> str:
+        return self.name

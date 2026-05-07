@@ -1,11 +1,14 @@
+from slugify import slugify
 from sqladmin import ModelView
 
+from src.models.animal_type import AnimalType
+from src.models.business_category import BusinessCategory
+from src.models.service import Service
 from src.models.user import User
 
 
 class UserAdmin(ModelView, model=User):
     """Admin view for managing users."""
-
     name = "User"
     name_plural = "Users"
     icon = "fa-solid fa-user"
@@ -39,6 +42,7 @@ class UserAdmin(ModelView, model=User):
     # Fields shown when creating a new user — disabled because we don't want
     # admins creating users directly (they should self-register)
     can_create = False
+    can_delete = False
 
     # Fields shown when editing an existing user
     form_columns = [
@@ -60,11 +64,6 @@ class UserAdmin(ModelView, model=User):
         User.updated_at,
     ]
 
-    # Don't allow deletion through admin — use is_active=False instead
-    can_delete = False
-
-
-from src.models.animal_type import AnimalType
 
 
 class AnimalTypeAdmin(ModelView, model=AnimalType):
@@ -84,9 +83,7 @@ class AnimalTypeAdmin(ModelView, model=AnimalType):
     ]
 
     column_default_sort = [(AnimalType.sort_order, False)]  # asc
-
     column_searchable_list = [AnimalType.slug, AnimalType.name]
-
     column_sortable_list = [
         AnimalType.id,
         AnimalType.slug,
@@ -114,3 +111,103 @@ class AnimalTypeAdmin(ModelView, model=AnimalType):
         AnimalType.created_at,
         AnimalType.updated_at,
     ]
+
+class BusinessCategoryAdmin(ModelView, model=BusinessCategory):
+    """Admin view for managing business categories (vet_clinic, grooming, etc)."""
+    name = "Business Category"
+    name_plural = "Business Categories"
+    icon = "fa-solid fa-tags"
+
+    can_delete = False
+    can_create = False
+
+    column_list = [
+        BusinessCategory.id,
+        BusinessCategory.slug,
+        BusinessCategory.name,
+        BusinessCategory.icon_url,
+        BusinessCategory.sort_order,
+        BusinessCategory.is_active,
+    ]
+    column_default_sort = [(BusinessCategory.sort_order, False)]
+    column_searchable_list = [BusinessCategory.slug, BusinessCategory.name]
+    column_sortable_list = [
+        BusinessCategory.id,
+        BusinessCategory.slug,
+        BusinessCategory.name,
+        BusinessCategory.sort_order,
+        BusinessCategory.is_active,
+    ]
+
+    form_columns = [
+        BusinessCategory.name,
+        BusinessCategory.icon_url,
+        BusinessCategory.sort_order,
+        BusinessCategory.is_active,
+    ]
+
+    column_details_list = [
+        BusinessCategory.id,
+        BusinessCategory.slug,
+        BusinessCategory.name,
+        BusinessCategory.icon_url,
+        BusinessCategory.sort_order,
+        BusinessCategory.is_active,
+        BusinessCategory.created_at,
+        BusinessCategory.updated_at,
+    ]
+
+
+class ServiceAdmin(ModelView, model=Service):
+    """Admin view for managing services within categories."""
+    name = "Service"
+    name_plural = "Services"
+    icon = "fa-solid fa-list-check"
+
+    can_delete = False
+
+    column_list = [
+        Service.id,
+        Service.slug,
+        Service.name,
+        "category.name",  # Show category name instead of category_id
+        Service.sort_order,
+        Service.is_active,
+    ]
+    column_labels = {"category.name": "Category"}
+    column_default_sort = [
+        (Service.category_id, False),
+        (Service.sort_order, False),
+    ]
+    column_searchable_list = [Service.slug, Service.name]
+    column_sortable_list = [
+        Service.id,
+        Service.slug,
+        Service.name,
+        Service.sort_order,
+        Service.is_active,
+    ]
+
+    # Form: category will render as a dropdown of all BusinessCategory records
+    form_columns = [
+        Service.name,
+        Service.category,
+        Service.sort_order,
+        Service.is_active,
+    ]
+
+    column_details_list = [
+        Service.id,
+        Service.slug,
+        Service.name,
+        Service.category,
+        Service.sort_order,
+        Service.is_active,
+        Service.created_at,
+        Service.updated_at,
+    ]
+
+    async def on_model_change(self, data, model, is_created, request):
+            """Auto-generate slug from name when creating a new service."""
+            if is_created and data.get("name") and not model.slug:
+                model.slug = slugify(data["name"], max_length=200)
