@@ -67,12 +67,14 @@ admin = Admin(
 # Register admin views
 ##deliberately at the end, rather than at the top of the file. Why: to avoid circular imports.
 from src.admin.views import (
-    AnimalTypeAdmin,  
+    AnimalTypeAdmin,
+    BusinessAdmin,  
     BusinessCategoryAdmin,
     ServiceAdmin,
     UserAdmin,
 )
 admin.add_view(UserAdmin)
 admin.add_view(AnimalTypeAdmin)
+admin.add_view(BusinessAdmin)
 admin.add_view(BusinessCategoryAdmin)
 admin.add_view(ServiceAdmin)

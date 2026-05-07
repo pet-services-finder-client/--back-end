@@ -1,10 +1,33 @@
 from slugify import slugify
+from sqladmin import action
 from sqladmin import ModelView
+from sqlalchemy import update
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
+from markupsafe import Markup
 
 from src.models.animal_type import AnimalType
+from src.models.business import Business
 from src.models.business_category import BusinessCategory
+from src.models.business_hours import BusinessHours
+from src.models.enums import BusinessStatus
 from src.models.service import Service
 from src.models.user import User
+
+def _format_status(status) -> Markup:
+    """Render BusinessStatus as a colored badge."""
+    colors = {
+        "pending": "#f59e0b",   # amber
+        "approved": "#10b981",  # green
+        "rejected": "#ef4444",  # red
+    }
+    value = status.value if hasattr(status, "value") else str(status)
+    color = colors.get(value, "#6b7280")
+    return Markup(
+        f'<span style="background-color: {color}; color: white; '
+        f'padding: 2px 8px; border-radius: 4px; font-size: 0.85em; '
+        f'text-transform: uppercase;">{value}</span>'
+    )
 
 
 class UserAdmin(ModelView, model=User):
@@ -211,3 +234,142 @@ class ServiceAdmin(ModelView, model=Service):
             """Auto-generate slug from name when creating a new service."""
             if is_created and data.get("name") and not model.slug:
                 model.slug = slugify(data["name"], max_length=200)
+
+class BusinessAdmin(ModelView, model=Business):
+    """Admin view for managing businesses, including moderation."""
+    name = "Business"
+    name_plural = "Businesses"
+    icon = "fa-solid fa-store"
+
+    # Admin doesn't create businesses — users propose them via POST /businesses.
+    # Admin DOES delete (e.g., spam, offensive content).
+    can_create = False
+
+    column_list = [
+        Business.id,
+        Business.name,
+        Business.status,
+        "category.name",
+        Business.city,
+        "owner.email",
+        Business.accepts_emergencies,
+        Business.created_at,
+    ]
+    column_labels = {
+        "category.name": "Category",
+        "owner.email": "Owner",
+    }
+    column_default_sort = [(Business.created_at, True)]  # newest first
+    # Render status as a colored badge in list and details views
+    column_formatters = {
+        Business.status: lambda obj, _: _format_status(obj.status),
+    }
+    column_formatters_detail = {
+        Business.status: lambda obj, _: _format_status(obj.status),
+    }
+    column_searchable_list = [Business.name, Business.slug, Business.address]
+    column_sortable_list = [
+        Business.id,
+        Business.name,
+        Business.status,
+        Business.city,
+        Business.created_at,
+    ]
+
+    # Edit form — owner and slug are intentionally read-only.
+    # owner: changing it would be a security issue.
+    # slug: used in URLs, regenerate via separate flow if needed.
+    form_columns = [
+        Business.name,
+        Business.description,
+        Business.category,
+        Business.status,
+        Business.address,
+        Business.city,
+        Business.latitude,
+        Business.longitude,
+        Business.phone,
+        Business.website,
+        Business.email,
+        Business.accepts_emergencies,
+        Business.emergency_24_7,
+        Business.cover_image_url,
+        Business.animal_types,
+        Business.services,
+    ]
+
+    column_details_list = [
+        Business.id,
+        Business.name,
+        Business.slug,
+        Business.description,
+        Business.status,
+        Business.category,
+        Business.owner,
+        Business.address,
+        Business.city,
+        Business.latitude,
+        Business.longitude,
+        Business.phone,
+        Business.website,
+        Business.email,
+        Business.accepts_emergencies,
+        Business.emergency_24_7,
+        Business.cover_image_url,
+        Business.animal_types,
+        Business.services,
+        Business.hours,
+        Business.created_at,
+        Business.updated_at,
+    ]
+
+    @action(
+        name="approve_businesses",
+        label="Approve",
+        confirmation_message="Approve selected businesses?",
+        add_in_detail=True,
+        add_in_list=True,
+    )
+    async def approve_businesses(self, request: Request) -> RedirectResponse:
+        """Mark selected businesses as approved."""
+        pks = request.query_params.get("pks", "").split(",")
+        pks = [int(pk) for pk in pks if pk]
+
+        if pks:
+            session = self.session_maker()
+            async with session as db:
+                await db.execute(
+                    update(Business)
+                    .where(Business.id.in_(pks))
+                    .values(status=BusinessStatus.APPROVED)
+                )
+                await db.commit()
+
+        referer = request.headers.get("Referer", request.url_for("admin:list", identity="business"))
+        return RedirectResponse(url=str(referer), status_code=302)
+
+    @action(
+        name="reject_businesses",
+        label="Reject",
+        confirmation_message="Reject selected businesses?",
+        add_in_detail=True,
+        add_in_list=True,
+    )
+    async def reject_businesses(self, request: Request) -> RedirectResponse:
+        """Mark selected businesses as rejected."""
+        pks = request.query_params.get("pks", "").split(",")
+        pks = [int(pk) for pk in pks if pk]
+
+        if pks:
+            session = self.session_maker()
+            async with session as db:
+                await db.execute(
+                    update(Business)
+                    .where(Business.id.in_(pks))
+                    .values(status=BusinessStatus.REJECTED)
+                )
+                await db.commit()
+
+        referer = request.headers.get("Referer", request.url_for("admin:list", identity="business"))
+        return RedirectResponse(url=str(referer), status_code=302)
+    
