@@ -27,3 +27,6 @@ class BusinessCategory(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    def __str__(self) -> str:
+        return self.name

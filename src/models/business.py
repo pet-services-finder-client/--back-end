@@ -113,3 +113,6 @@ class Business(Base):
         cascade="all, delete-orphan",
         order_by="BusinessHours.day_of_week",
     )
+
+    def __str__(self) -> str:
+        return self.name

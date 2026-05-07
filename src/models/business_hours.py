@@ -51,3 +51,12 @@ class BusinessHours(Base):
 
     # Relationships
     business: Mapped["Business"] = relationship(back_populates="hours")
+
+    def __str__(self) -> str:
+            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            day_label = days[self.day_of_week]
+            if self.is_closed:
+                return f"{day_label}: closed"
+            if self.is_24h:
+                return f"{day_label}: 24/7"
+            return f"{day_label}: {self.open_time}-{self.close_time}"
