@@ -14,6 +14,11 @@ class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)
 
 
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=200)
+    email: EmailStr | None = None
+
+
 class UserRead(UserBase):
     """Schema returned to clients — never includes the password."""
     model_config = ConfigDict(from_attributes=True)
@@ -23,6 +28,13 @@ class UserRead(UserBase):
     is_verified: bool
     is_admin: bool
     created_at: datetime
+
+class UserPublic(BaseModel):
+    """Minimal user info safe to expose publicly (e.g., as business owner)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    full_name: str | None
     
 
 class Token(BaseModel):

@@ -7,7 +7,7 @@ from src.schemas.animal_type import AnimalTypeRead
 from src.schemas.business_category import BusinessCategoryRead
 from src.schemas.business_hours import BusinessHoursRead
 from src.schemas.service import ServiceRead
-from src.schemas.user_public import UserPublic
+from src.schemas.user import UserPublic
 
 
 class BusinessRead(BaseModel):
