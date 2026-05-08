@@ -11,7 +11,7 @@ from src.core.security import (
     verify_password,
 )
 from src.models.user import User
-from src.schemas.user import Token, UserCreate, UserRead
+from src.schemas.user import Token, UserCreate, UserRead, UserUpdate
 from typing import Annotated
 from src.core.deps import get_current_active_user
 
@@ -80,4 +80,41 @@ async def read_current_user(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
     """Return the profile of the currently authenticated user."""
+    return current_user
+
+@router.patch("/me", response_model=UserRead)
+async def update_current_user(
+    payload: UserUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    """Update the current user's profile (name, email)."""
+    # Get only fields the user actually sent
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # If email is changing, check that it's not taken by someone else
+    if "email" in update_data and update_data["email"] != current_user.email:
+        result = await db.execute(
+            select(User).where(User.email == update_data["email"])
+        )
+        if result.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with this email already exists",
+            )
+
+    # Apply updates
+    for field, value in update_data.items():
+        setattr(current_user, field, value)
+
+    try:
+        await db.commit()
+        await db.refresh(current_user)
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user",
+        )
+
     return current_user
