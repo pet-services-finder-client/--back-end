@@ -18,6 +18,10 @@ class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
     email: EmailStr | None = None
 
+class PasswordChange(BaseModel):
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=128)
+
 
 class UserRead(UserBase):
     """Schema returned to clients — never includes the password."""

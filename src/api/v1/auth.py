@@ -11,7 +11,7 @@ from src.core.security import (
     verify_password,
 )
 from src.models.user import User
-from src.schemas.user import Token, UserCreate, UserRead, UserUpdate
+from src.schemas.user import PasswordChange, Token, UserCreate, UserRead, UserUpdate
 from typing import Annotated
 from src.core.deps import get_current_active_user
 
@@ -118,3 +118,33 @@ async def update_current_user(
         )
 
     return current_user
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: PasswordChange,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> None:
+    """Change the current user's password.
+
+    Requires the current password as confirmation — this prevents an attacker
+    with brief access to a logged-in session from locking the user out.
+    """
+    # Verify the current password
+    if not verify_password(payload.old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password",
+        )
+
+    # Hash and save the new password
+    current_user.hashed_password = hash_password(payload.new_password)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password",
+        )
