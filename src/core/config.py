@@ -41,6 +41,13 @@ class Settings(BaseSettings):
             for origin in self.BACKEND_CORS_ORIGINS_RAW.split(",")
             if origin.strip()
         ]
+    
+    # Email (Resend)
+    RESEND_API_KEY: str
+    RESEND_FROM_EMAIL: str = "onboarding@resend.dev"
+
+    # Frontend URL (used in email links, e.g. password reset)
+    FRONTEND_URL: str = "http://localhost:3000"
 
 
 @lru_cache
