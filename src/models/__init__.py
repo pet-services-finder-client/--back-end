@@ -4,6 +4,7 @@ from src.models.business import Business
 from src.models.business_category import BusinessCategory
 from src.models.business_hours import BusinessHours
 from src.models.enums import BusinessStatus, PetGender
+from src.models.password_reset_token import PasswordResetToken
 from src.models.pet import Pet
 from src.models.service import Service
 from src.models.user import User
@@ -15,6 +16,7 @@ __all__ = [
     "BusinessCategory",
     "BusinessHours",
     "BusinessStatus",
+    "PasswordResetToken",
     "Pet",
     "PetGender",
     "Service",
