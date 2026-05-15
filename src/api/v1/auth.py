@@ -2,16 +2,31 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta, timezone
 
 from src.core.database import get_db
+from src.core.deps import get_current_active_user
+from src.core.email import send_password_reset_email
+from src.core.config import settings
 from src.core.security import (
     create_access_token,
     create_refresh_token,
+    generate_reset_token,
     hash_password,
+    hash_reset_token,
     verify_password,
 )
+from src.models.password_reset_token import PasswordResetToken
 from src.models.user import User
-from src.schemas.user import PasswordChange, Token, UserCreate, UserRead, UserUpdate
+from src.schemas.user import (
+    ForgotPasswordRequest,
+    PasswordChange,
+    ResetPasswordRequest,
+    Token,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 from typing import Annotated
 from src.core.deps import get_current_active_user
 
@@ -148,3 +163,114 @@ async def change_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update password",
         )
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    """Start the password reset flow.
+
+    Anti-enumeration: we always return the same neutral response, regardless
+    of whether the email exists. This prevents an attacker from probing which
+    emails are registered.
+    """
+    neutral_response = {
+        "message": "If an account exists for this email, we've sent a password reset link.",
+    }
+
+    # Look up the user
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    # If no user — silently return success (anti-enumeration)
+    if user is None or not user.is_active:
+        return neutral_response
+
+    # Generate token: raw goes to email, hash goes to DB
+    raw_token, token_hash = generate_reset_token()
+
+    # Save token with 1-hour expiry
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    db.add(reset_token)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        # Don't surface the error to the user — they'd see it as "failed reset"
+        # which gives no useful info. Logs will show the real issue.
+        return neutral_response
+
+    # Build reset URL and send email
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
+    send_password_reset_email(
+        to=user.email,
+        reset_url=reset_url,
+        user_name=user.full_name,
+    )
+
+    return neutral_response
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Complete the password reset flow using a token from email.
+
+    All validation failures return the same generic error to prevent leaking
+    information about which tokens exist, are expired, or already used.
+    """
+    generic_error = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired token",
+    )
+
+    # Hash the submitted token to look it up in the DB
+    token_hash = hash_reset_token(payload.token)
+
+    # Find the token record
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    reset_token = result.scalar_one_or_none()
+
+    if reset_token is None:
+        raise generic_error
+
+    # Check if already used
+    if reset_token.used_at is not None:
+        raise generic_error
+
+    # Check if expired
+    if reset_token.expires_at < datetime.now(timezone.utc):
+        raise generic_error
+
+    # Load the associated user
+    user_result = await db.execute(
+        select(User).where(User.id == reset_token.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        # User deleted or deactivated since requesting reset
+        raise generic_error
+
+    # Update password and mark token as used in a single transaction
+    user.hashed_password = hash_password(payload.new_password)
+    reset_token.used_at = datetime.now(timezone.utc)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset password",
+        )
+

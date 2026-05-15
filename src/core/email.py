@@ -55,3 +55,72 @@ def send_email(
     except Exception as exc:
         logger.error("Failed to send email to %s: %s", to, exc, exc_info=True)
         return None
+
+
+def send_password_reset_email(
+    to: str,
+    reset_url: str,
+    user_name: str | None = None,
+) -> str | None:
+    """Send a password reset email with a clickable reset link.
+
+    Args:
+        to: recipient email
+        reset_url: full URL the user clicks to reset (e.g. https://app/reset?token=xyz)
+        user_name: user's full name (used in greeting; falls back to generic greeting)
+    """
+    greeting = f"Привіт, {user_name}!" if user_name else "Привіт!"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1f2937;">
+      <h1 style="color: #111827;">🐾 Pawly — Відновлення пароля</h1>
+      <p>{greeting}</p>
+      <p>
+        Ми отримали запит на відновлення пароля для вашого акаунта Pawly.
+        Щоб створити новий пароль і знову отримати доступ до платформи,
+        перейдіть за посиланням нижче:
+      </p>
+      <p style="margin: 32px 0;">
+        <a href="{reset_url}"
+           style="background-color: #2563eb; color: white; padding: 12px 24px;
+                  text-decoration: none; border-radius: 6px; display: inline-block;">
+          Відновити пароль
+        </a>
+      </p>
+      <p style="color: #6b7280; font-size: 14px;">
+        Або скопіюйте це посилання у браузер:<br>
+        <a href="{reset_url}" style="color: #2563eb; word-break: break-all;">{reset_url}</a>
+      </p>
+      <p style="color: #6b7280; font-size: 14px;">
+        Посилання дійсне <strong>1 годину</strong>. Якщо це були не ви —
+        просто проігноруйте цей лист. Ваш акаунт залишиться у безпеці.
+      </p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
+      <p style="color: #9ca3af; font-size: 12px;">Дякуємо, що користуєтесь Pawly! 🐾<br>— Команда Pawly</p>
+    </body>
+    </html>
+    """
+
+    text = f"""
+{greeting}
+
+Ми отримали запит на відновлення пароля для вашого акаунта Pawly.
+Щоб створити новий пароль, перейдіть за посиланням:
+
+{reset_url}
+
+Посилання дійсне 1 годину. Якщо це були не ви — просто проігноруйте
+цей лист. Ваш акаунт залишиться у безпеці.
+
+Дякуємо, що користуєтесь Pawly!
+— Команда Pawly
+    """.strip()
+
+    return send_email(
+        to=to,
+        subject="Pawly: Відновлення пароля",
+        html=html,
+        text=text,
+    )

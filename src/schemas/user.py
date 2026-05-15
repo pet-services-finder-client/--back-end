@@ -22,6 +22,17 @@ class PasswordChange(BaseModel):
     old_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8, max_length=128)
 
+class ResetPasswordRequest(BaseModel):
+    """Submit a new password using a reset token from email."""
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    """Request to start the password reset flow."""
+    email: EmailStr
 
 class UserRead(UserBase):
     """Schema returned to clients — never includes the password."""
