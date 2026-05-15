@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -44,3 +46,26 @@ def decode_token(token: str) -> dict[str, Any] | None:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         return None
+
+def generate_reset_token() -> tuple[str, str]:
+    """Generate a password reset token.
+
+    Returns a tuple of (raw_token, token_hash):
+        - raw_token: send this to the user via email (in the reset link)
+        - token_hash: store this in the database
+
+    Why both: if our DB is compromised, an attacker cannot use stored token
+    hashes directly — they'd need the raw token (which only exists in the email).
+    """
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    return raw_token, token_hash
+
+
+def hash_reset_token(raw_token: str) -> str:
+    """Hash a raw reset token for database lookup.
+
+    Used in the reset-password endpoint to find the matching record:
+    user submits the raw token, we hash it, then query by token_hash.
+    """
+    return hashlib.sha256(raw_token.encode()).hexdigest()
