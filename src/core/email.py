@@ -9,6 +9,7 @@ import logging
 import resend
 
 from src.core.config import settings
+from src.core.i18n import to_vocative
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def send_password_reset_email(
         reset_url: full URL the user clicks to reset (e.g. https://app/reset?token=xyz)
         user_name: user's full name (used in greeting; falls back to generic greeting)
     """
-    greeting = f"Привіт, {user_name}!" if user_name else "Привіт!"
+    greeting = f"Привіт, {to_vocative(user_name)}!" if user_name else "Привіт!"
 
     html = f"""
     <!DOCTYPE html>
@@ -121,6 +122,69 @@ def send_password_reset_email(
     return send_email(
         to=to,
         subject="Pawly: Відновлення пароля",
+        html=html,
+        text=text,
+    )
+
+def send_welcome_email(
+    to: str,
+    user_name: str | None = None,
+) -> str | None:
+    """Send a welcome email to a newly registered user.
+
+    Args:
+        to: recipient email
+        user_name: user's full name (used in greeting; falls back to generic greeting)
+    """
+    greeting = f"Привіт, {to_vocative(user_name)}!" if user_name else "Привіт!"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #1f2937;">
+      <h1 style="color: #111827;">🐾 Ласкаво просимо до Pawly!</h1>
+      <p>{greeting}</p>
+      <p>
+        Ми раді вітати вас у <strong>Pawly</strong> — платформі для власників
+        домашніх тварин у Києві та області.
+      </p>
+      <p>
+        Тепер ви зможете швидко знаходити ветеринарні клініки, зоомагазини,
+        грумінг-салони та інші pet services поруч із вами.
+      </p>
+      <p style="margin: 32px 0;">
+        <a href="{settings.FRONTEND_URL}"
+           style="background-color: #2563eb; color: white; padding: 12px 24px;
+                  text-decoration: none; border-radius: 6px; display: inline-block;">
+          Перейти до Pawly
+        </a>
+      </p>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
+      <p style="color: #9ca3af; font-size: 12px;">
+        Дякуємо, що обрали Pawly! 🐾<br>— Команда Pawly
+      </p>
+    </body>
+    </html>
+    """
+
+    text = f"""
+{greeting}
+
+Ми раді вітати вас у Pawly — платформі для власників домашніх тварин
+у Києві та області.
+
+Тепер ви зможете швидко знаходити ветеринарні клініки, зоомагазини,
+грумінг-салони та інші pet services поруч із вами.
+
+Перейти до Pawly: {settings.FRONTEND_URL}
+
+Дякуємо, що обрали Pawly!
+— Команда Pawly
+    """.strip()
+
+    return send_email(
+        to=to,
+        subject="Ласкаво просимо до Pawly! 🐾",
         html=html,
         text=text,
     )

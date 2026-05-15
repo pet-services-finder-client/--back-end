@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.core.database import get_db
 from src.core.deps import get_current_active_user
-from src.core.email import send_password_reset_email
+from src.core.email import send_password_reset_email, send_welcome_email
 from src.core.config import settings
 from src.core.security import (
     create_access_token,
@@ -59,6 +59,11 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)) -> U
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+    # Send welcome email after successful registration.
+    # If the email fails, we still return success — the account is created
+    # and the user can still use the app. send_welcome_email logs failures.
+    send_welcome_email(to=new_user.email, user_name=new_user.full_name)
+    
     return new_user
 
 
