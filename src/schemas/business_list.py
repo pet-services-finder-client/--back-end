@@ -23,6 +23,7 @@ class BusinessListItem(BaseModel):
     category: BusinessCategoryRead
 
     created_at: datetime
+    distance_km: float | None = None
 
 
 class BusinessListResponse(BaseModel):
