@@ -104,17 +104,28 @@ async def list_businesses(
         )
 
     # Geo filter — Haversine formula for distance in kilometers
+    # We keep the expression in a variable so we can reuse it below
+    # for sorting and including distance_km in the response.
+    distance_km_expr = None
     if lat is not None and lon is not None and radius_km is not None:
-        distance_km = 6371 * func.acos(
+        distance_km_expr = 6371 * func.acos(
             func.cos(func.radians(lat))
             * func.cos(func.radians(Business.latitude))
             * func.cos(func.radians(Business.longitude) - func.radians(lon))
             + func.sin(func.radians(lat)) * func.sin(func.radians(Business.latitude))
         )
-        filters.append(distance_km <= radius_km)
+        filters.append(distance_km_expr <= radius_km)
 
     # Build the base statement
-    base_stmt = select(Business).where(*filters)
+    # When geo search is active, include distance_km in the SELECT so
+    # we can both sort by it and return it in the response.
+    if distance_km_expr is not None:
+        base_stmt = select(
+            Business,
+            distance_km_expr.label("distance_km"),
+        ).where(*filters)
+    else:
+        base_stmt = select(Business).where(*filters)
 
     # Add many-to-many filters via JOINs
     if animal_type_id is not None:
@@ -186,17 +197,39 @@ async def list_businesses(
     total = total_result.scalar_one()
 
     # Fetch the actual page of records
-    items_stmt = (
-        base_stmt
-        .order_by(Business.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    items_result = await db.execute(items_stmt)
-    businesses = list(items_result.scalars().all())
+    # If geo search is active, sort by distance ascending (nearest first)
+    # and include distance_km in each item. Otherwise, sort by created_at
+    # (newest first) as before.
+    if distance_km_expr is not None:
+        items_stmt = (
+            base_stmt
+            .order_by(distance_km_expr.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items_result = await db.execute(items_stmt)
+        # Result rows are tuples (Business, distance_km)
+        items = [
+            BusinessListItem.model_validate(b).model_copy(
+                update={"distance_km": round(d, 2)}
+            )
+            for b, d in items_result.all()
+        ]
+    else:
+        items_stmt = (
+            base_stmt
+            .order_by(Business.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items_result = await db.execute(items_stmt)
+        items = [
+            BusinessListItem.model_validate(b)
+            for b in items_result.scalars().all()
+        ]
 
     return BusinessListResponse(
-        items=[BusinessListItem.model_validate(b) for b in businesses],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,
