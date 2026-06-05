@@ -1,12 +1,15 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
- 
+from sqlalchemy.orm import selectinload
+
 from src.models.animal_type import AnimalType
+from src.models.business import Business
 from src.models.business_category import BusinessCategory
+from src.models.enums import BusinessStatus
 from src.models.service import Service
- 
- 
+
+
 async def validate_category(db: AsyncSession, category_id: int) -> BusinessCategory:
     result = await db.execute(
         select(BusinessCategory).where(
@@ -21,8 +24,8 @@ async def validate_category(db: AsyncSession, category_id: int) -> BusinessCateg
             detail=f"Invalid or inactive category_id: {category_id}",
         )
     return category
- 
- 
+
+
 async def validate_animal_types(db: AsyncSession, ids: list[int]) -> list[AnimalType]:
     result = await db.execute(
         select(AnimalType).where(
@@ -37,8 +40,8 @@ async def validate_animal_types(db: AsyncSession, ids: list[int]) -> list[Animal
             detail="One or more animal_type_ids are invalid or inactive",
         )
     return animal_types
- 
- 
+
+
 async def validate_services(
     db: AsyncSession, ids: list[int], category_id: int
 ) -> list[Service]:
@@ -66,4 +69,22 @@ async def validate_services(
             ),
         )
     return services
- 
+
+
+async def load_business_with_relations(
+    db: AsyncSession, business_id: int, *, only_approved: bool = False
+) -> Business | None:
+    stmt = (
+        select(Business)
+        .where(Business.id == business_id)
+        .options(
+            selectinload(Business.animal_types),
+            selectinload(Business.services),
+            selectinload(Business.hours),
+            selectinload(Business.owner),
+        )
+    )
+    if only_approved:
+        stmt = stmt.where(Business.status == BusinessStatus.APPROVED)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()

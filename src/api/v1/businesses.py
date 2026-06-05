@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from src.core.database import get_db
 from src.models.business import Business
@@ -20,6 +19,7 @@ from src.core.deps import get_current_active_user
 from src.core.slug import generate_unique_business_slug
 from src.models.user import User
 from src.crud.business import (
+    load_business_with_relations,
     validate_animal_types,
     validate_category,
     validate_services,
@@ -110,7 +110,6 @@ async def list_businesses(
         )
         filters.append(distance_km_expr <= radius_km)
 
-
     if distance_km_expr is not None:
         base_stmt = select(
             Business,
@@ -177,7 +176,6 @@ async def list_businesses(
     total_result = await db.execute(count_stmt)
     total = total_result.scalar_one()
 
-
     if distance_km_expr is not None:
         items_stmt = (
             base_stmt
@@ -212,6 +210,7 @@ async def list_businesses(
         offset=offset,
     )
 
+
 @router.post(
     "",
     response_model=BusinessRead,
@@ -227,7 +226,6 @@ async def create_business(
     services = await validate_services(db, payload.service_ids, payload.category_id)
 
     slug = await generate_unique_business_slug(db, payload.name)
-
 
     business = Business(
         name=payload.name,
@@ -247,7 +245,6 @@ async def create_business(
         emergency_24_7=payload.emergency_24_7,
         cover_image_url=payload.cover_image_url,
     )
-
 
     business.animal_types = animal_types
     business.services = services
@@ -273,17 +270,8 @@ async def create_business(
             detail="Failed to create business",
         )
 
-    result = await db.execute(
-        select(Business)
-        .where(Business.id == business.id)
-        .options(
-            selectinload(Business.animal_types),
-            selectinload(Business.services),
-            selectinload(Business.hours),
-            selectinload(Business.owner),
-        )
-    )
-    return result.scalar_one()
+    return await load_business_with_relations(db, business.id)
+
 
 @router.patch("/{business_id}", response_model=BusinessRead)
 async def update_business(
@@ -292,18 +280,7 @@ async def update_business(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Business:
-    
-
-    result = await db.execute(
-        select(Business)
-        .where(Business.id == business_id)
-        .options(
-            selectinload(Business.animal_types),
-            selectinload(Business.services),
-            selectinload(Business.hours),
-        )
-    )
-    business = result.scalar_one_or_none()
+    business = await load_business_with_relations(db, business_id)
 
     if business is None or business.owner_id != current_user.id:
         raise HTTPException(
@@ -325,7 +302,6 @@ async def update_business(
     if "animal_type_ids" in update_data:
         ids = update_data.pop("animal_type_ids")
         business.animal_types = await validate_animal_types(db, ids)
-
 
     if "service_ids" in update_data:
         ids = update_data.pop("service_ids")
@@ -360,18 +336,8 @@ async def update_business(
             detail="Failed to update business",
         )
 
+    return await load_business_with_relations(db, business.id)
 
-    result = await db.execute(
-        select(Business)
-        .where(Business.id == business.id)
-        .options(
-            selectinload(Business.animal_types),
-            selectinload(Business.services),
-            selectinload(Business.hours),
-            selectinload(Business.owner),
-        )
-    )
-    return result.scalar_one()
 
 @router.delete("/{business_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_business(
@@ -379,7 +345,6 @@ async def delete_business(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> None:
-    
     result = await db.execute(
         select(Business).where(Business.id == business_id)
     )
@@ -406,20 +371,7 @@ async def get_business(
     business_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Business:
-    result = await db.execute(
-        select(Business)
-        .where(
-            Business.id == business_id,
-            Business.status == BusinessStatus.APPROVED,
-        )
-        .options(
-            selectinload(Business.animal_types),
-            selectinload(Business.services),
-            selectinload(Business.hours),
-            selectinload(Business.owner),
-        )
-    )
-    business = result.scalar_one_or_none()
+    business = await load_business_with_relations(db, business_id, only_approved=True)
     if business is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
