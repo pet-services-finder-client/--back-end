@@ -607,7 +607,7 @@ async def test_search_open_now_midnight_carryover(client, db_session, seed, monk
             # вівторок, 02:00 за Києвом
             return datetime(2024, 1, 2, 2, 0, tzinfo=tz)
 
-    monkeypatch.setattr("src.api.v1.businesses.datetime", _FrozenDatetime)
+    monkeypatch.setattr("src.crud.business.datetime", _FrozenDatetime)
 
     # понеділок (0): 19:00–03:00 (open > close → нічна зміна)
     await add_business(
