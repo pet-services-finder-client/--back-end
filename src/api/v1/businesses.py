@@ -1,14 +1,11 @@
 from typing import Annotated
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.models.business import Business
-from src.models.associations import business_animal_types, business_services
 from src.schemas.business_create import BusinessCreate
 from src.schemas.business_update import BusinessUpdate
 from src.models.enums import BusinessStatus
@@ -19,6 +16,7 @@ from src.core.deps import get_current_active_user
 from src.core.slug import generate_unique_business_slug
 from src.models.user import User
 from src.crud.business import (
+    build_business_search_query,
     load_business_with_relations,
     validate_animal_types,
     validate_category,
@@ -82,95 +80,18 @@ async def list_businesses(
             detail="lat, lon, and radius_km must all be provided together",
         )
 
-    filters = [Business.status == BusinessStatus.APPROVED]
-
-    if category_id is not None:
-        filters.append(Business.category_id == category_id)
-    if accepts_emergencies is not None:
-        filters.append(Business.accepts_emergencies == accepts_emergencies)
-    if emergency_24_7 is not None:
-        filters.append(Business.emergency_24_7 == emergency_24_7)
-
-    if q is not None:
-        pattern = f"%{q}%"
-        filters.append(
-            or_(
-                Business.name.ilike(pattern),
-                Business.description.ilike(pattern),
-            )
-        )
-
-    distance_km_expr = None
-    if lat is not None and lon is not None and radius_km is not None:
-        distance_km_expr = 6371 * func.acos(
-            func.cos(func.radians(lat))
-            * func.cos(func.radians(Business.latitude))
-            * func.cos(func.radians(Business.longitude) - func.radians(lon))
-            + func.sin(func.radians(lat)) * func.sin(func.radians(Business.latitude))
-        )
-        filters.append(distance_km_expr <= radius_km)
-
-    if distance_km_expr is not None:
-        base_stmt = select(
-            Business,
-            distance_km_expr.label("distance_km"),
-        ).where(*filters)
-    else:
-        base_stmt = select(Business).where(*filters)
-
-    if animal_type_id is not None:
-        base_stmt = base_stmt.join(
-            business_animal_types,
-            Business.id == business_animal_types.c.business_id,
-        ).where(business_animal_types.c.animal_type_id == animal_type_id)
-    if service_id is not None:
-        base_stmt = base_stmt.join(
-            business_services,
-            Business.id == business_services.c.business_id,
-        ).where(business_services.c.service_id == service_id)
-
-    if open_now:
-        kyiv_now = datetime.now(ZoneInfo("Europe/Kyiv"))
-        today_weekday = kyiv_now.weekday()
-        today_time = kyiv_now.time()
-
-        yesterday = kyiv_now - timedelta(days=1)
-        yesterday_weekday = yesterday.weekday()
-
-        today_open = and_(
-            BusinessHours.day_of_week == today_weekday,
-            BusinessHours.is_closed.is_(False),
-            or_(
-                BusinessHours.is_24h.is_(True),
-                and_(
-                    BusinessHours.open_time <= BusinessHours.close_time,
-                    BusinessHours.open_time <= today_time,
-                    BusinessHours.close_time >= today_time,
-                ),
-                and_(
-                    BusinessHours.open_time > BusinessHours.close_time,
-                    or_(
-                        BusinessHours.open_time <= today_time,
-                        BusinessHours.close_time >= today_time,
-                    ),
-                ),
-            ),
-        )
-
-        yesterday_carryover = and_(
-            BusinessHours.day_of_week == yesterday_weekday,
-            BusinessHours.is_closed.is_(False),
-            BusinessHours.is_24h.is_(False),
-            BusinessHours.open_time > BusinessHours.close_time,
-            BusinessHours.close_time >= today_time,
-        )
-
-        base_stmt = base_stmt.join(
-            BusinessHours, BusinessHours.business_id == Business.id
-        ).where(or_(today_open, yesterday_carryover))
-
-    if animal_type_id is not None or service_id is not None or open_now:
-        base_stmt = base_stmt.distinct()
+    base_stmt, distance_km_expr = build_business_search_query(
+        category_id=category_id,
+        accepts_emergencies=accepts_emergencies,
+        emergency_24_7=emergency_24_7,
+        animal_type_id=animal_type_id,
+        service_id=service_id,
+        lat=lat,
+        lon=lon,
+        radius_km=radius_km,
+        q=q,
+        open_now=open_now,
+    )
 
     count_stmt = select(func.count()).select_from(base_stmt.subquery())
     total_result = await db.execute(count_stmt)
