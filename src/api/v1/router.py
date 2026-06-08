@@ -7,6 +7,7 @@ from src.api.v1 import (
     business_categories,
     businesses,
     pets,
+    reviews,
     services,
 )    
 
@@ -17,5 +18,6 @@ api_router.include_router(animal_types.router)
 api_router.include_router(business_categories.router)
 api_router.include_router(services.router)
 api_router.include_router(businesses.router)
+api_router.include_router(reviews.router)
 api_router.include_router(pets.router)
 api_router.include_router(admin.router)
