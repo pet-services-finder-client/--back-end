@@ -168,3 +168,77 @@ async def delete_review(
 
     await db.delete(review)
     await db.commit()
+
+# ====================================================================
+# Admin operations — moderation by users with is_admin=True
+# ====================================================================
+
+async def list_all_reviews_for_admin(
+    db: AsyncSession,
+    *,
+    limit: int,
+    offset: int,
+) -> tuple[list[Review], int]:
+    """Return (reviews, total) for admin moderation — includes hidden ones.
+
+    Unlike the public listing, this returns reviews regardless of is_hidden
+    and across all businesses (including pending/rejected). Admins need to
+    see everything to moderate.
+
+    Sorted newest first so fresh content surfaces for review.
+    """
+    count_stmt = select(func.count()).select_from(Review)
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    items_stmt = (
+        select(Review)
+        .options(selectinload(Review.author))
+        .order_by(Review.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    items = list((await db.execute(items_stmt)).scalars().all())
+    return items, total
+
+
+async def hide_review(db: AsyncSession, review_id: int) -> Review:
+    """Hide a review from public listings. Idempotent.
+
+    Calling hide on an already-hidden review is not an error — admin UI
+    might double-click or two admins might act simultaneously. Returns
+    the review in its (now hidden) state either way.
+
+    Raises 404 if the review doesn't exist.
+    """
+    review = await _get_review_or_404(db, review_id)
+    if not review.is_hidden:
+        review.is_hidden = True
+        await db.commit()
+        await db.refresh(review)
+    return review
+
+
+async def unhide_review(db: AsyncSession, review_id: int) -> Review:
+    """Restore a hidden review to public visibility. Idempotent."""
+    review = await _get_review_or_404(db, review_id)
+    if review.is_hidden:
+        review.is_hidden = False
+        await db.commit()
+        await db.refresh(review)
+    return review
+
+
+async def _get_review_or_404(db: AsyncSession, review_id: int) -> Review:
+    """Load a review with author eagerly, or raise 404."""
+    result = await db.execute(
+        select(Review)
+        .where(Review.id == review_id)
+        .options(selectinload(Review.author))
+    )
+    review = result.scalar_one_or_none()
+    if review is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+    return review
