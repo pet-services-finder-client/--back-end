@@ -47,3 +47,23 @@ class ReviewUpdate(BaseModel):
     """Payload for PATCH /reviews/{id} — all fields optional."""
     rating: int | None = Field(default=None, ge=1, le=5)
     text: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewAdminRead(ReviewRead):
+    """Admin view of a review — includes the is_hidden moderation flag.
+
+    Inherits all public fields from ReviewRead and adds is_hidden, which
+    admins need to see (so the moderation UI can show which reviews are
+    currently hidden vs visible).
+    """
+
+    is_hidden: bool
+
+
+class ReviewAdminListResponse(BaseModel):
+    """Paginated list of all reviews for admin moderation."""
+
+    items: list[ReviewAdminRead]
+    total: int
+    limit: int
+    offset: int
