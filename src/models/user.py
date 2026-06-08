@@ -9,6 +9,7 @@ from src.core.database import Base
 if TYPE_CHECKING:
     from src.models.business import Business
     from src.models.pet import Pet
+    from src.models.review import Review
 
 
 class User(Base):
@@ -41,6 +42,11 @@ class User(Base):
     )
     businesses: Mapped[list["Business"]] = relationship(
         back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+
+    reviews_written: Mapped[list["Review"]] = relationship(
+        back_populates="author",
         cascade="all, delete-orphan",
     )
 

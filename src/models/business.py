@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from src.models.animal_type import AnimalType
     from src.models.business_category import BusinessCategory
     from src.models.business_hours import BusinessHours
+    from src.models.review import Review
     from src.models.service import Service
     from src.models.user import User
 
@@ -112,6 +113,11 @@ class Business(Base):
         back_populates="business",
         cascade="all, delete-orphan",
         order_by="BusinessHours.day_of_week",
+    )
+
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="business",
+        cascade="all, delete-orphan",
     )
 
     def __str__(self) -> str:
