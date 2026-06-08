@@ -622,3 +622,74 @@ async def test_search_open_now_midnight_carryover(client, db_session, seed, monk
     assert resp.status_code == 200
     names = {i["name"] for i in resp.json()["items"]}
     assert "Нічний" in names
+
+
+# ====================================================================
+# AUTOCOMPLETE  (GET /businesses/autocomplete)
+# ====================================================================
+
+async def test_autocomplete_basic(client, db_session, seed):
+    """Returns approved businesses whose name starts with the query."""
+    await add_business(
+        db_session, seed, name="АлеВет Клініка", slug="alevet",
+        address="вул. Перша, 1",
+    )
+    await add_business(
+        db_session, seed, name="Котячий рай", slug="cats",
+        address="вул. Друга, 2",
+    )
+    resp = await client.get(f"{API}/businesses/autocomplete", params={"q": "але"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "АлеВет Клініка"
+    assert data[0]["slug"] == "alevet"
+    assert data[0]["category_slug"] == "vet"
+
+
+async def test_autocomplete_case_insensitive(client, db_session, seed):
+    """ILIKE matches regardless of letter case."""
+    await add_business(
+        db_session, seed, name="АлеВет Клініка", slug="alevet",
+        address="вул. Перша, 1",
+    )
+    resp = await client.get(f"{API}/businesses/autocomplete", params={"q": "АЛЕ"})
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+async def test_autocomplete_too_short_returns_422(client, seed):
+    """Query under 2 characters is rejected by validation."""
+    resp = await client.get(f"{API}/businesses/autocomplete", params={"q": "а"})
+    assert resp.status_code == 422
+
+
+async def test_autocomplete_respects_limit(client, db_session, seed):
+    """limit parameter caps the number of returned suggestions."""
+    for i in range(5):
+        await add_business(
+            db_session, seed, name=f"Альфа {i}", slug=f"alpha-{i}",
+            address=f"вул. Тестова, {i}",
+        )
+    resp = await client.get(
+        f"{API}/businesses/autocomplete", params={"q": "альфа", "limit": 2}
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+async def test_autocomplete_ignores_pending(client, db_session, seed):
+    """Only approved businesses appear in autocomplete (pending/rejected hidden)."""
+    await add_business(
+        db_session, seed, name="Видимий", slug="visible",
+        address="вул. Перша, 1", status=BusinessStatus.APPROVED,
+    )
+    await add_business(
+        db_session, seed, name="Видимий теж", slug="visible-too",
+        address="вул. Друга, 2", status=BusinessStatus.PENDING,
+    )
+    resp = await client.get(f"{API}/businesses/autocomplete", params={"q": "вид"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Видимий"

@@ -196,3 +196,22 @@ def build_business_search_query(
         stmt = stmt.distinct()
 
     return stmt, distance_km_expr
+
+async def search_businesses_for_autocomplete(
+    db: AsyncSession,
+    query: str,
+    limit: int,
+) -> list[tuple[Business, str]]:
+    pattern = f"{query}%"
+    stmt = (
+        select(Business, BusinessCategory.slug)
+        .join(BusinessCategory, Business.category_id == BusinessCategory.id)
+        .where(
+            Business.status == BusinessStatus.APPROVED,
+            Business.name.ilike(pattern),
+        )
+        .order_by(Business.name)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.all())

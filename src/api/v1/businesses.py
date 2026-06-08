@@ -11,6 +11,7 @@ from src.schemas.business_update import BusinessUpdate
 from src.models.enums import BusinessStatus
 from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
+from src.schemas.business_autocomplete import BusinessAutocompleteItem
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
 from src.core.deps import get_current_active_user
 from src.core.slug import generate_unique_business_slug
@@ -18,6 +19,7 @@ from src.models.user import User
 from src.crud.business import (
     build_business_search_query,
     load_business_with_relations,
+    search_businesses_for_autocomplete,
     validate_animal_types,
     validate_category,
     validate_services,
@@ -285,6 +287,37 @@ async def delete_business(
 
     await db.delete(business)
     await db.commit()
+
+
+@router.get(
+    "/autocomplete",
+    response_model=list[BusinessAutocompleteItem],
+)
+async def autocomplete_businesses(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[
+        str,
+        Query(
+            min_length=2,
+            max_length=100,
+            description="Search prefix (case-insensitive starts-with match)",
+        ),
+    ],
+    limit: Annotated[
+        int,
+        Query(ge=1, le=20, description="Max suggestions to return"),
+    ] = 10,
+) -> list[BusinessAutocompleteItem]:
+    rows = await search_businesses_for_autocomplete(db, q, limit)
+    return [
+        BusinessAutocompleteItem(
+            id=business.id,
+            name=business.name,
+            slug=business.slug,
+            category_slug=category_slug,
+        )
+        for business, category_slug in rows
+    ]
 
 
 @router.get("/{business_id}", response_model=BusinessRead)
