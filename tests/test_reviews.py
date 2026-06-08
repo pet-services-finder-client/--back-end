@@ -295,3 +295,162 @@ async def test_list_reviews_on_pending_business_returns_404(
 async def test_list_reviews_on_nonexistent_business_returns_404(client, seed):
     resp = await client.get(f"{API}/businesses/999999/reviews")
     assert resp.status_code == 404
+
+# PATCH /reviews/{id} — edit own review
+
+async def test_patch_review_updates_rating(auth_as_reviewer, db_session, seed):
+    """Author can change rating on their own review."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=5, text="Спершу так",
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await auth_as_reviewer.patch(
+        f"{API}/reviews/{review.id}",
+        json={"rating": 3},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["rating"] == 3
+    assert data["text"] == "Спершу так"  # untouched
+
+
+async def test_patch_review_updates_text_only(auth_as_reviewer, db_session, seed):
+    """PATCH is partial — text alone updates without touching rating."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=4, text="Старий текст",
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await auth_as_reviewer.patch(
+        f"{API}/reviews/{review.id}",
+        json={"text": "Новий текст"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["rating"] == 4
+    assert data["text"] == "Новий текст"
+
+
+async def test_patch_review_rejects_invalid_rating(auth_as_reviewer, db_session, seed):
+    """Pydantic still enforces 1–5 on PATCH."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await auth_as_reviewer.patch(
+        f"{API}/reviews/{review.id}",
+        json={"rating": 6},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_someone_elses_review_returns_404(
+    auth_as_reviewer, db_session, seed
+):
+    """Anti-enumeration: editing another user's review returns 404, not 403."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["owner"].id,  # different author
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await auth_as_reviewer.patch(
+        f"{API}/reviews/{review.id}",
+        json={"rating": 1},
+    )
+    assert resp.status_code == 404
+
+
+async def test_patch_nonexistent_review_returns_404(auth_as_reviewer, seed):
+    resp = await auth_as_reviewer.patch(
+        f"{API}/reviews/999999",
+        json={"rating": 5},
+    )
+    assert resp.status_code == 404
+
+
+async def test_patch_review_requires_auth(client, db_session, seed):
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"{API}/reviews/{review.id}",
+        json={"rating": 3},
+    )
+    assert resp.status_code in (401, 403)
+
+
+# DELETE /reviews/{id} — remove own review
+
+
+async def test_delete_own_review_success(auth_as_reviewer, db_session, seed):
+    """Author can delete their own review."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+    review_id = review.id
+
+    resp = await auth_as_reviewer.delete(f"{API}/reviews/{review_id}")
+    assert resp.status_code == 204
+
+    # Confirm it's gone from public listing
+    list_resp = await auth_as_reviewer.get(
+        f"{API}/businesses/{seed['business'].id}/reviews"
+    )
+    assert list_resp.json()["total"] == 0
+
+
+async def test_delete_someone_elses_review_returns_404(
+    auth_as_reviewer, db_session, seed
+):
+    """Anti-enumeration on DELETE too."""
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["owner"].id,
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await auth_as_reviewer.delete(f"{API}/reviews/{review.id}")
+    assert resp.status_code == 404
+
+
+async def test_delete_nonexistent_review_returns_404(auth_as_reviewer, seed):
+    resp = await auth_as_reviewer.delete(f"{API}/reviews/999999")
+    assert resp.status_code == 404
+
+
+async def test_delete_review_requires_auth(client, db_session, seed):
+    review = Review(
+        business_id=seed["business"].id,
+        author_id=seed["reviewer"].id,
+        rating=5,
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    resp = await client.delete(f"{API}/reviews/{review.id}")
+    assert resp.status_code in (401, 403)
