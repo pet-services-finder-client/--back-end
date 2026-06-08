@@ -108,3 +108,63 @@ async def list_business_reviews(
     )
     items = list((await db.execute(items_stmt)).scalars().all())
     return items, total
+
+async def update_review(
+    db: AsyncSession,
+    *,
+    review_id: int,
+    current_user_id: int,
+    rating: int | None,
+    text: str | None,
+) -> Review:
+    """Update an existing review. Only the author can edit their own review.
+
+    Anti-enumeration: same 404 for "doesn't exist" and "not yours" — so the
+    caller can't probe which review IDs belong to other users.
+
+    Only fields that were explicitly sent (non-None) are applied. This makes
+    PATCH partial — a client sending only `{"rating": 4}` won't wipe the text.
+    """
+    result = await db.execute(
+        select(Review)
+        .where(Review.id == review_id)
+        .options(selectinload(Review.author))
+    )
+    review = result.scalar_one_or_none()
+
+    if review is None or review.author_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+
+    if rating is not None:
+        review.rating = rating
+    if text is not None:
+        review.text = text
+
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+async def delete_review(
+    db: AsyncSession,
+    *,
+    review_id: int,
+    current_user_id: int,
+) -> None:
+    """Delete a review. Only the author can delete their own review."""
+    result = await db.execute(
+        select(Review).where(Review.id == review_id)
+    )
+    review = result.scalar_one_or_none()
+
+    if review is None or review.author_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+
+    await db.delete(review)
+    await db.commit()

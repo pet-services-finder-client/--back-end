@@ -6,13 +6,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.core.deps import get_current_active_user
-from src.crud.review import create_review, list_business_reviews
+from src.crud.review import (
+    create_review,
+    delete_review,
+    list_business_reviews,
+    update_review,
+)
 from src.models.review import Review
 from src.models.user import User
-from src.schemas.review import ReviewCreate, ReviewListResponse, ReviewRead
+from src.schemas.review import (
+    ReviewCreate,
+    ReviewListResponse,
+    ReviewRead,
+    ReviewUpdate,
+)
 
 
 router = APIRouter(prefix="/businesses/{business_id}/reviews", tags=["reviews"])
+
+review_actions_router = APIRouter(prefix="/reviews", tags=["reviews"])
 
 
 @router.post(
@@ -56,4 +68,44 @@ async def list_reviews(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+@review_actions_router.patch(
+    "/{review_id}",
+    response_model=ReviewRead,
+)
+async def edit_review(
+    review_id: int,
+    payload: ReviewUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> Review:
+    """Edit your own review.
+
+    Returns 404 if the review doesn't exist or belongs to another user
+    (anti-enumeration — don't leak which review IDs are taken).
+    """
+    return await update_review(
+        db,
+        review_id=review_id,
+        current_user_id=current_user.id,
+        rating=payload.rating,
+        text=payload.text,
+    )
+
+
+@review_actions_router.delete(
+    "/{review_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_review(
+    review_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> None:
+    """Delete your own review."""
+    await delete_review(
+        db,
+        review_id=review_id,
+        current_user_id=current_user.id,
     )

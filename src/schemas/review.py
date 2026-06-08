@@ -42,3 +42,8 @@ class ReviewListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+class ReviewUpdate(BaseModel):
+    """Payload for PATCH /reviews/{id} — all fields optional."""
+    rating: int | None = Field(default=None, ge=1, le=5)
+    text: str | None = Field(default=None, max_length=2000)
