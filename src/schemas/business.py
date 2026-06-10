@@ -48,3 +48,7 @@ class BusinessRead(BaseModel):
     # Timestamps
     created_at: datetime
     updated_at: datetime
+
+    # Ratings (aggregated from non-hidden reviews)
+    avg_rating: float | None = None
+    reviews_count: int = 0
