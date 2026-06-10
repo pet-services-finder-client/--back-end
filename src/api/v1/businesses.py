@@ -18,6 +18,7 @@ from src.core.slug import generate_unique_business_slug
 from src.models.user import User
 from src.crud.business import (
     build_business_search_query,
+    compute_ratings_for_businesses,
     load_business_with_relations,
     search_businesses_for_autocomplete,
     validate_animal_types,
@@ -107,11 +108,19 @@ async def list_businesses(
             .offset(offset)
         )
         items_result = await db.execute(items_stmt)
+        rows_with_distance = items_result.all()
+        business_ids = [b.id for b, _ in rows_with_distance]
+        ratings = await compute_ratings_for_businesses(db, business_ids)
         items = [
-            BusinessListItem.model_validate(b).model_copy(
-                update={"distance_km": round(d, 2)}
-            )
-            for b, d in items_result.all()
+            BusinessListItem.model_validate(b).model_copy(update={
+                "distance_km": round(d, 2),
+                "avg_rating": (
+                    round(ratings[b.id][0], 2)
+                    if b.id in ratings else None
+                ),
+                "reviews_count": ratings.get(b.id, (None, 0))[1],
+            })
+            for b, d in rows_with_distance
         ]
     else:
         items_stmt = (
@@ -121,9 +130,18 @@ async def list_businesses(
             .offset(offset)
         )
         items_result = await db.execute(items_stmt)
+        businesses_list = list(items_result.scalars().all())
+        business_ids = [b.id for b in businesses_list]
+        ratings = await compute_ratings_for_businesses(db, business_ids)
         items = [
-            BusinessListItem.model_validate(b)
-            for b in items_result.scalars().all()
+            BusinessListItem.model_validate(b).model_copy(update={
+                "avg_rating": (
+                    round(ratings[b.id][0], 2)
+                    if b.id in ratings else None
+                ),
+                "reviews_count": ratings.get(b.id, (None, 0))[1],
+            })
+            for b in businesses_list
         ]
 
     return BusinessListResponse(
@@ -324,11 +342,17 @@ async def autocomplete_businesses(
 async def get_business(
     business_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> Business:
+) -> BusinessRead:
     business = await load_business_with_relations(db, business_id, only_approved=True)
     if business is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business not found",
         )
-    return business
+
+    ratings = await compute_ratings_for_businesses(db, [business.id])
+    avg, count = ratings.get(business.id, (None, 0))
+    return BusinessRead.model_validate(business).model_copy(update={
+        "avg_rating": round(avg, 2) if avg is not None else None,
+        "reviews_count": count,
+    })

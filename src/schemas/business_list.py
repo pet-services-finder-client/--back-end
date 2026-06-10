@@ -25,6 +25,9 @@ class BusinessListItem(BaseModel):
     created_at: datetime
     distance_km: float | None = None
 
+    avg_rating: float | None = None
+    reviews_count: int = 0
+
 
 class BusinessListResponse(BaseModel):
     """Paginated list of businesses with metadata."""

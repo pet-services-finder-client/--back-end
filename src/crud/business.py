@@ -12,7 +12,9 @@ from src.models.business import Business
 from src.models.business_category import BusinessCategory
 from src.models.business_hours import BusinessHours
 from src.models.enums import BusinessStatus
+from src.models.review import Review
 from src.models.service import Service
+
 
 
 async def validate_category(db: AsyncSession, category_id: int) -> BusinessCategory:
@@ -215,3 +217,29 @@ async def search_businesses_for_autocomplete(
     )
     result = await db.execute(stmt)
     return list(result.all())
+
+async def compute_ratings_for_businesses(
+    db: AsyncSession,
+    business_ids: list[int],
+) -> dict[int, tuple[float, int]]:
+
+    if not business_ids:
+        return {}
+
+    stmt = (
+        select(
+            Review.business_id,
+            func.avg(Review.rating).label("avg_rating"),
+            func.count(Review.id).label("reviews_count"),
+        )
+        .where(
+            Review.business_id.in_(business_ids),
+            Review.is_hidden.is_(False),
+        )
+        .group_by(Review.business_id)
+    )
+    result = await db.execute(stmt)
+    return {
+        row.business_id: (float(row.avg_rating), row.reviews_count)
+        for row in result.all()
+    }

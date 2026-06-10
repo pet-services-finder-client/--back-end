@@ -10,15 +10,15 @@ from src.models.business import Business
 from src.models.business_category import BusinessCategory
 from src.models.business_hours import BusinessHours
 from src.models.enums import BusinessStatus
+from src.models.review import Review
 from src.models.service import Service
 from src.models.user import User
 
 API = "/api/v1"
 
 
-# ====================================================================
 # helpers
-# ====================================================================
+
 
 def make_hours():
     return [
@@ -90,9 +90,8 @@ async def add_business(
     return business
 
 
-# ====================================================================
 # fixtures
-# ====================================================================
+
 
 @pytest_asyncio.fixture
 async def seed(db_session):
@@ -140,9 +139,8 @@ async def auth_client(client, seed):
     app.dependency_overrides.pop(get_current_active_user, None)
 
 
-# ====================================================================
 # CREATE  (POST /businesses)
-# ====================================================================
+
 
 async def test_create_business_success(auth_client, seed):
     resp = await auth_client.post(f"{API}/businesses", json=make_payload(seed))
@@ -154,7 +152,6 @@ async def test_create_business_success(auth_client, seed):
 
 
 async def test_create_requires_auth(client, seed):
-    # без підміни авторизації — запит має бути відхилений
     resp = await client.post(f"{API}/businesses", json=make_payload(seed))
     assert resp.status_code in (401, 403)
 
@@ -253,9 +250,7 @@ async def test_create_rejects_closed_day_with_times(auth_client, seed):
     assert resp.status_code == 422
 
 
-# ====================================================================
 # GET single  (GET /businesses/{id})
-# ====================================================================
 
 async def test_get_approved_business(client, db_session, seed):
     b = await add_business(
@@ -289,10 +284,8 @@ async def test_get_nonexistent_returns_404(client, seed):
     resp = await client.get(f"{API}/businesses/999999")
     assert resp.status_code == 404
 
-
-# ====================================================================
 # UPDATE  (PATCH /businesses/{id})
-# ====================================================================
+
 
 async def test_update_name_success(auth_client, db_session, seed):
     b = await add_business(
@@ -382,9 +375,9 @@ async def test_update_requires_auth(client, db_session, seed):
     assert resp.status_code in (401, 403)
 
 
-# ====================================================================
+
 # DELETE  (DELETE /businesses/{id})
-# ====================================================================
+
 
 async def test_delete_own_pending_success(auth_client, db_session, seed):
     b = await add_business(
@@ -427,9 +420,9 @@ async def test_delete_requires_auth(client, db_session, seed):
     assert resp.status_code in (401, 403)
 
 
-# ====================================================================
+
 # LIST / SEARCH  (GET /businesses)
-# ====================================================================
+
 
 async def test_search_returns_only_approved(client, db_session, seed):
     await add_business(db_session, seed, name="Схвалений", slug="ok",
@@ -624,9 +617,9 @@ async def test_search_open_now_midnight_carryover(client, db_session, seed, monk
     assert "Нічний" in names
 
 
-# ====================================================================
+
 # AUTOCOMPLETE  (GET /businesses/autocomplete)
-# ====================================================================
+
 
 async def test_autocomplete_basic(client, db_session, seed):
     """Returns approved businesses whose name starts with the query."""
@@ -693,3 +686,132 @@ async def test_autocomplete_ignores_pending(client, db_session, seed):
     data = resp.json()
     assert len(data) == 1
     assert data[0]["name"] == "Видимий"
+
+
+
+# avg_rating and reviews_count integration
+
+
+async def test_business_detail_includes_avg_rating_and_count(
+    client, db_session, seed, other_user
+):
+
+    business = await add_business(
+        db_session, seed,
+        name="Rating Test 1", slug="rating-test-1", address="вул. Перша, 1",
+    )
+
+
+    second_reviewer = User(
+        email="second@test.com",
+        hashed_password="x",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(second_reviewer)
+    await db_session.commit()
+
+    db_session.add_all([
+        Review(business_id=business.id, author_id=other_user.id, rating=5),
+        Review(business_id=business.id, author_id=second_reviewer.id, rating=3),
+    ])
+    await db_session.commit()
+
+    resp = await client.get(f"{API}/businesses/{business.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["avg_rating"] == 4.0
+    assert data["reviews_count"] == 2
+
+
+async def test_business_detail_returns_null_rating_when_no_reviews(
+    client, db_session, seed
+):
+
+    business = await add_business(
+        db_session, seed,
+        name="Rating Test 2", slug="rating-test-2", address="вул. Друга, 2",
+    )
+
+    resp = await client.get(f"{API}/businesses/{business.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["avg_rating"] is None
+    assert data["reviews_count"] == 0
+
+
+async def test_business_detail_excludes_hidden_reviews_from_rating(
+    client, db_session, seed, other_user
+):
+
+    business = await add_business(
+        db_session, seed,
+        name="Rating Test 3", slug="rating-test-3", address="вул. Третя, 3",
+    )
+
+    second_reviewer = User(
+        email="second@test.com",
+        hashed_password="x",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(second_reviewer)
+    await db_session.commit()
+
+    db_session.add_all([
+        Review(
+            business_id=business.id, author_id=other_user.id,
+            rating=5, is_hidden=False,
+        ),
+        Review(
+            business_id=business.id, author_id=second_reviewer.id,
+            rating=1, is_hidden=True,  # admin-hidden spam
+        ),
+    ])
+    await db_session.commit()
+
+    resp = await client.get(f"{API}/businesses/{business.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["avg_rating"] == 5.0
+    assert data["reviews_count"] == 1
+
+
+async def test_business_list_includes_avg_rating_and_count(
+    client, db_session, seed, other_user
+):
+    """GET /businesses returns avg_rating and reviews_count on each item."""
+    business = await add_business(
+        db_session, seed,
+        name="Rating Test 4", slug="rating-test-4", address="вул. Четверта, 4",
+    )
+    db_session.add(Review(
+        business_id=business.id,
+        author_id=other_user.id,
+        rating=4,
+    ))
+    await db_session.commit()
+
+    resp = await client.get(f"{API}/businesses")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["avg_rating"] == 4.0
+    assert items[0]["reviews_count"] == 1
+
+
+async def test_business_list_returns_null_rating_for_no_reviews(
+    client, db_session, seed
+):
+
+    await add_business(
+        db_session, seed,
+        name="Rating Test 5", slug="rating-test-5", address="вул. Пʼята, 5",
+    )
+
+    resp = await client.get(f"{API}/businesses")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["avg_rating"] is None
+    assert items[0]["reviews_count"] == 0
