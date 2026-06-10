@@ -4,17 +4,18 @@ Backend API for Pawly — a marketplace connecting pet owners with veterinary cl
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Language | Python 3.13 |
-| Web framework | FastAPI |
-| ORM | SQLAlchemy 2.0 (async) |
-| Database | PostgreSQL 16 |
-| Migrations | Alembic |
-| Validation | Pydantic 2 |
-| Auth | JWT via python-jose, bcrypt |
-| Admin panel | sqladmin |
-| Containerization | Docker + Docker Compose |
+Layer - Technology
+
+Language - Python 3.13 
+Web framework - FastAPI
+ORM - SQLAlchemy 2.0 (async)
+Database - PostgreSQL 16
+Migrations - Alembic
+Validation - Pydantic 2
+Auth - JWT via python-jose, bcrypt
+Admin panel - sqladmin
+Containerization - Docker + Docker Compose
+Testing - pytest, pytest-asyncio, httpx 
 
 ## Quick Start
 
@@ -34,30 +35,33 @@ The admin panel is at `http://localhost:8000/admin`.
 
 ## Project Structure
 
-```
 .
-├── migrations/                  # Alembic migrations
-│   ├── versions/                # Migration files
-│   └── env.py                   # Alembic environment
+├── migrations/                       # Alembic migrations
+│   ├── versions/                     # Migration files (one per schema change)
+│   └── env.py                        # Alembic environment config
 ├── src/
-│   ├── api/v1/                  # API endpoints (route handlers)
-│   │   ├── auth.py              # Registration, login, refresh
-│   │   ├── animal_types.py      # GET list of animal types
-│   │   ├── pets.py              # CRUD for user's pets
-│   │   ├── businesses.py        # Public business search & detail
-│   │   ├── business_categories.py
-│   │   ├── services.py
-│   │   ├── admin.py             # Admin-only endpoints
-│   │   └── router.py            # Aggregates all routers
-│   ├── admin/                   # sqladmin setup (admin panel)
-│   │   ├── auth.py              # AdminAuth backend
-│   │   └── views.py             # ModelView definitions
+│   ├── api/v1/                       # API endpoints (route handlers)
+│   │   ├── auth.py                   # Registration, login, refresh, /me
+│   │   ├── animal_types.py           # GET list of animal types
+│   │   ├── pets.py                   # CRUD for user's pets
+│   │   ├── businesses.py             # Business search, detail, autocomplete, submission
+│   │   ├── business_categories.py    # GET list of business categories
+│   │   ├── services.py               # GET list of services (filter by category)
+│   │   ├── reviews.py                # Reviews CRUD (POST/GET/PATCH/DELETE)
+│   │   ├── admin.py                  # Admin endpoints (incl. review moderation)
+│   │   └── router.py                 # Aggregates all routers under /api/v1
+│   ├── admin/                        # sqladmin setup (admin panel at /admin)
+│   │   ├── auth.py                   # AdminAuth backend
+│   │   └── views.py                  # ModelView definitions
 │   ├── core/
-│   │   ├── config.py            # Settings (env vars)
-│   │   ├── database.py          # Async engine, session, Base
-│   │   ├── security.py          # JWT, bcrypt helpers
-│   │   └── deps.py              # FastAPI dependencies (get_current_user, etc)
-│   ├── models/                  # SQLAlchemy models
+│   │   ├── config.py                 # Settings (loaded from env vars)
+│   │   ├── database.py               # Async engine, session factory, Base
+│   │   ├── security.py               # JWT encode/decode, bcrypt helpers
+│   │   └── deps.py                   # FastAPI deps (get_current_user, get_current_admin_user, get_db)
+│   ├── crud/                         # Query builders and business logic
+│   │   ├── business.py               # Search, validators, autocomplete, rating aggregation
+│   │   └── review.py                 # Review create/update/delete/list/hide/unhide
+│   ├── models/                       # SQLAlchemy ORM models
 │   │   ├── user.py
 │   │   ├── pet.py
 │   │   ├── animal_type.py
@@ -65,18 +69,41 @@ The admin panel is at `http://localhost:8000/admin`.
 │   │   ├── business_category.py
 │   │   ├── business_hours.py
 │   │   ├── service.py
-│   │   ├── associations.py      # Junction tables (m:n)
-│   │   ├── enums.py             # PetGender, BusinessStatus
-│   │   └── __init__.py          # Imports all models for SQLAlchemy registry
-│   ├── schemas/                 # Pydantic schemas (request/response)
-│   └── main.py                  # FastAPI app entrypoint
-├── tests/                       # (placeholder for future tests)
+│   │   ├── review.py                 # Review with rating, text, is_hidden flag
+│   │   ├── password_reset_token.py
+│   │   ├── associations.py           # Junction tables (business_animal_types, business_services)
+│   │   ├── enums.py                  # PetGender, BusinessStatus
+│   │   └── __init__.py               # Imports all models for SQLAlchemy registry
+│   ├── schemas/                      # Pydantic schemas (request/response shapes)
+│   │   ├── user.py                   # UserRead, UserPublic, UserCreate
+│   │   ├── pet.py
+│   │   ├── animal_type.py
+│   │   ├── business.py               # BusinessRead with avg_rating, reviews_count
+│   │   ├── business_create.py        # User submission payload
+│   │   ├── business_update.py        # Partial update payload
+│   │   ├── business_list.py          # BusinessListItem, BusinessListResponse
+│   │   ├── business_autocomplete.py  # Lightweight schema for typeahead
+│   │   ├── business_category.py
+│   │   ├── business_hours.py
+│   │   ├── service.py
+│   │   └── review.py                 # ReviewCreate, ReviewRead, ReviewUpdate, ReviewAdminRead
+│   └── main.py                       # FastAPI app entrypoint, CORS, admin mount
+├── tests/                            # 90 tests using pytest + httpx
+│   ├── conftest.py                   # Shared fixtures (db_session, client)
+│   ├── test_businesses.py            # Search, CRUD, ratings (51 tests)
+│   ├── test_reviews.py               # Review POST/GET/PATCH/DELETE (23 tests)
+│   ├── test_admin_reviews.py         # Admin hide/unhide + permissions (11 tests)
+│   └── test_review_model.py          # DB-level constraints (5 tests)
+├── data/                             # Reference data (xlsx files excluded from Git)
+├── scripts/
+│   └── import_businesses.py          # CSV → DB import (123 Kyiv businesses)
 ├── docker-compose.yml
 ├── Dockerfile
 ├── alembic.ini
-├── requirements.txt
+├── pytest.ini                        # pytest config (asyncio_mode=auto)
+├── requirements.txt                  # Runtime deps
+├── requirements-import.txt           # Optional deps for data import (pandas, openpyxl)
 └── README.md
-```
 
 ## Architecture Overview
 
@@ -164,6 +191,38 @@ Live API docs: `http://localhost:8000/docs`
 | PATCH | `/api/v1/pets/{id}` | Update pet |
 | DELETE | `/api/v1/pets/{id}` | Delete pet |
 
+### Reviews endpoints
+
+Public:
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/businesses/{id}/reviews` | List visible reviews for a business (paginated, newest first) |
+
+Authenticated:
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/businesses/{id}/reviews` | Create a review (rating 1-5, optional text) |
+| PATCH | `/api/v1/reviews/{id}` | Edit your own review |
+| DELETE | `/api/v1/reviews/{id}` | Delete your own review |
+
+Admin-only:
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/admin/reviews` | List all reviews including hidden ones |
+| PATCH | `/api/v1/admin/reviews/{id}/hide` | Hide a review from public listings (idempotent) |
+| PATCH | `/api/v1/admin/reviews/{id}/unhide` | Restore a hidden review (idempotent) |
+
+**Business rules:**
+- One review per user per business (DB-level `UniqueConstraint`)
+- Users cannot review their own businesses (400)
+- Anti-enumeration: editing or deleting someone else's review returns 404, not 403
+- Hidden reviews are excluded from public listings AND from `avg_rating` / `reviews_count` aggregates
+- `GET /businesses/{id}` and `GET /businesses` include `avg_rating` (float|null) and `reviews_count` (int) on every business
+
+
 ### `GET /businesses` filters
 
 The search endpoint supports many optional filters that combine with AND:
@@ -232,6 +291,23 @@ docker compose up -d --build
 docker compose exec app alembic upgrade head
 ```
 
+### Run tests
+
+```bash
+# All tests
+pytest -v
+
+# One file
+pytest tests/test_reviews.py -v
+
+# Filter by name pattern
+pytest -v -k "hidden"
+```
+
+Tests use a separate Postgres database (`pawly_test`) — create/drop tables run automatically per test for isolation. Override the URL via `TEST_DATABASE_URL` env var if needed.
+
+### Reset the database
+
 ### Generate a migration after model changes
 
 ```bash
@@ -257,29 +333,25 @@ Copy `.env.example` to `.env` and adjust:
 
 ## Roadmap
 
+
 ### Completed
 
 - **Auth** — registration, login, JWT tokens, current user endpoint
 - **Pets** — CRUD for user's pets with animal type validation
 - **Animal Types** — reference data with admin management
-- **Admin Panel Phase 1** — `is_admin` flag and admin-only dependency
-- **Admin Panel Phase 2** — sqladmin integration with User and AnimalType views
-- **Business Phase 1** — all data models (Business, BusinessCategory, Service, BusinessHours, junction tables) with seed data
-- **Business Phase 2** — public read endpoints (categories, services, business detail, search with filters)
+- **Admin Panel** — `is_admin` dependency + sqladmin integration for User, AnimalType, Business
+- **Business models & data** — Business, BusinessCategory, Service, BusinessHours, junction tables with seed data and CSV import (123 real Kyiv businesses)
+- **Business read API** — categories, services, detail, search with filters (geo, text, services, open-now, etc.)
+- **Business write API** — user-submitted proposals with pending → approved/rejected admin moderation
+- **Autocomplete** — `GET /businesses/autocomplete` for typeahead UI
+- **Reviews epic** — full CRUD on reviews (POST/GET/PATCH/DELETE), admin hide/unhide moderation, `avg_rating` and `reviews_count` integrated into Business responses
 
-### In progress
-
-(none currently)
-
-### Backlog
-
-- **Business Phase 3** — user-submitted business proposals (POST/PATCH/DELETE) with admin moderation
-- **Business Phase 4** — CSV import script for real data from analyst
-- **Reviews epic** — user reviews and ratings for businesses
 - **Email verification** — verify user email after registration
 - **Search ranking** — sort businesses by distance when geo params are provided
 - **Postgres FTS** — full-text search with relevance instead of ILIKE
 - **Region/city filtering** — pending product decision (Kyiv + Kyiv Oblast handling)
+- **Google ratings integration** — hybrid display of Pawly + Google ratings on business detail (~10 SP, requires Google Places API + caching strategy)
+- **Render deployment** — production deploy with custom domain, SSL, automatic deploy from Git
 
 ## Architectural Decisions
 
