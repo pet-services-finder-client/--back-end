@@ -1,11 +1,10 @@
-"""Review endpoints — users can post and read reviews about businesses."""
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.deps import get_current_active_user
+from src.core.deps import get_current_active_user, get_current_verified_user
 from src.crud.review import (
     create_review,
     delete_review,
@@ -36,7 +35,7 @@ async def post_business_review(
     business_id: int,
     payload: ReviewCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_verified_user)],
 ) -> Review:
     return await create_review(
         db,
@@ -78,13 +77,8 @@ async def edit_review(
     review_id: int,
     payload: ReviewUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_verified_user)],
 ) -> Review:
-    """Edit your own review.
-
-    Returns 404 if the review doesn't exist or belongs to another user
-    (anti-enumeration — don't leak which review IDs are taken).
-    """
     return await update_review(
         db,
         review_id=review_id,
@@ -103,7 +97,6 @@ async def remove_review(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> None:
-    """Delete your own review."""
     await delete_review(
         db,
         review_id=review_id,

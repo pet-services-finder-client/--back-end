@@ -6,21 +6,31 @@ from datetime import datetime, timedelta, timezone
 
 from src.core.database import get_db
 from src.core.deps import get_current_active_user
-from src.core.email import send_password_reset_email, send_welcome_email
+from src.core.email import (
+    send_password_reset_email,
+    send_verification_email,
+    send_welcome_with_verification_email,
+)
 from src.core.config import settings
 from src.core.security import (
     create_access_token,
     create_refresh_token,
     generate_reset_token,
+    generate_verification_token,
     hash_password,
     hash_reset_token,
+    hash_verification_token,
     verify_password,
 )
+
+from src.models.email_verification_token import EmailVerificationToken
 from src.models.password_reset_token import PasswordResetToken
 from src.models.user import User
 from src.schemas.user import (
+    EmailVerificationRequest,
     ForgotPasswordRequest,
     PasswordChange,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     Token,
     UserCreate,
@@ -40,7 +50,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=status.HTTP_201_CREATED,
 )
 async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
-    """Register a new user account."""
     # Check if email is already taken
     result = await db.execute(select(User).where(User.email == user_in.email))
     existing_user = result.scalar_one_or_none()
@@ -59,10 +68,22 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)) -> U
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    # Send welcome email after successful registration.
-    # If the email fails, we still return success — the account is created
-    # and the user can still use the app. send_welcome_email logs failures.
-    send_welcome_email(to=new_user.email, user_name=new_user.full_name)
+
+    raw_token, token_hash = generate_verification_token()
+    verification_token = EmailVerificationToken(
+        user_id=new_user.id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    db.add(verification_token)
+    await db.commit()
+
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
+    send_welcome_with_verification_email(
+        to=new_user.email,
+        user_name=new_user.full_name,
+        verification_url=verification_url,
+    )
     
     return new_user
 
@@ -108,7 +129,6 @@ async def update_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
-    """Update the current user's profile (name, email)."""
     # Get only fields the user actually sent
     update_data = payload.model_dump(exclude_unset=True)
 
@@ -145,11 +165,6 @@ async def change_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> None:
-    """Change the current user's password.
-
-    Requires the current password as confirmation — this prevents an attacker
-    with brief access to a logged-in session from locking the user out.
-    """
     # Verify the current password
     if not verify_password(payload.old_password, current_user.hashed_password):
         raise HTTPException(
@@ -174,15 +189,12 @@ async def forgot_password(
     payload: ForgotPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
-    """Start the password reset flow.
-
-    Anti-enumeration: we always return the same neutral response, regardless
-    of whether the email exists. This prevents an attacker from probing which
-    emails are registered.
-    """
     neutral_response = {
-        "message": "If an account exists for this email, we've sent a password reset link.",
-    }
+       "message": (
+        "Якщо для цієї пошти існує акаунт, "
+        "ми надіслали посилання для скидання паролю."
+    ),
+}
 
     # Look up the user
     result = await db.execute(select(User).where(User.email == payload.email))
@@ -226,11 +238,6 @@ async def reset_password(
     payload: ResetPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Complete the password reset flow using a token from email.
-
-    All validation failures return the same generic error to prevent leaking
-    information about which tokens exist, are expired, or already used.
-    """
     generic_error = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Invalid or expired token",
@@ -248,11 +255,9 @@ async def reset_password(
     if reset_token is None:
         raise generic_error
 
-    # Check if already used
     if reset_token.used_at is not None:
         raise generic_error
 
-    # Check if expired
     if reset_token.expires_at < datetime.now(timezone.utc):
         raise generic_error
 
@@ -279,3 +284,117 @@ async def reset_password(
             detail="Failed to reset password",
         )
 
+@router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email(
+    payload: EmailVerificationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    generic_error = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired token",
+    )
+
+    # Hash the submitted token to look it up in the DB
+    token_hash = hash_verification_token(payload.token)
+
+    result = await db.execute(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token_hash == token_hash
+        )
+    )
+    verification_token = result.scalar_one_or_none()
+
+    if verification_token is None:
+        raise generic_error
+
+    # Already used
+    if verification_token.used_at is not None:
+        raise generic_error
+
+    # Expired
+    if verification_token.expires_at < datetime.now(timezone.utc):
+        raise generic_error
+
+    # Load the associated user
+    user_result = await db.execute(
+        select(User).where(User.id == verification_token.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        # User was deleted or deactivated since requesting verification
+        raise generic_error
+
+    # Mark verified + consume the token in one transaction
+    user.is_verified = True
+    verification_token.used_at = datetime.now(timezone.utc)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify email",
+        )
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+async def resend_verification(
+    payload: ResendVerificationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    neutral_response = {
+        "message": (
+            "Якщо для цієї пошти існує непідтверджений акаунт, "
+            "ми надіслали нове посилання для підтвердження."
+        ),
+    }
+
+    # Look up the user
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+
+    # No user, inactive user, or already verified → silent success
+    if user is None or not user.is_active or user.is_verified:
+        return neutral_response
+
+    # Simple rate limit: if a token was created less than 60 seconds ago,
+    # don't issue a new one. Prevents abuse and accidental spam.
+    recent_token_stmt = (
+        select(EmailVerificationToken)
+        .where(EmailVerificationToken.user_id == user.id)
+        .where(EmailVerificationToken.used_at.is_(None))
+        .order_by(EmailVerificationToken.created_at.desc())
+        .limit(1)
+    )
+    recent = (await db.execute(recent_token_stmt)).scalar_one_or_none()
+    if recent is not None:
+        age = datetime.now(timezone.utc) - recent.created_at
+        if age.total_seconds() < 60:
+            return neutral_response
+
+    # Generate fresh token
+    raw_token, token_hash = generate_verification_token()
+
+    new_token = EmailVerificationToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    db.add(new_token)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        return neutral_response
+
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
+    send_verification_email(
+        to=user.email,
+        user_name=user.full_name,
+        verification_url=verification_url,
+    )
+
+    return neutral_response

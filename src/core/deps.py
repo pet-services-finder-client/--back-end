@@ -11,8 +11,6 @@ from src.core.security import decode_token
 from src.models.user import User
 
 
-# The tokenUrl is used by Swagger UI to know where to send the login request
-# when you click "Authorize" — it doesn't affect actual token validation
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
 
 
@@ -20,7 +18,6 @@ async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
-    """Resolve the current user from a Bearer token. Raises 401 on any failure."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -60,10 +57,19 @@ async def get_current_active_user(
 async def get_current_admin_user(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> User:
-    """Reject the request if the authenticated user is not an admin."""
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
+        )
+    return current_user
+
+async def get_current_verified_user(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    if not current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Будь ласка, підтвердіть свою електронну пошту, щоб виконати цю дію.",
         )
     return current_user
