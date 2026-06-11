@@ -1,16 +1,15 @@
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from wtforms.validators import email
 
 
 class UserBase(BaseModel):
-    """Shared fields used across user-related schemas."""
     email: EmailStr
     full_name: str | None = None
 
 
 class UserCreate(UserBase):
-    """Schema for user registration — accepts a plain password."""
     password: str = Field(min_length=8, max_length=128)
 
 
@@ -23,19 +22,20 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 class ResetPasswordRequest(BaseModel):
-    """Submit a new password using a reset token from email."""
     token: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8, max_length=128)
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
-class ForgotPasswordRequest(BaseModel):
-    """Request to start the password reset flow."""
+class EmailVerificationRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=100)
+
+
+class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 class UserRead(UserBase):
-    """Schema returned to clients — never includes the password."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -45,7 +45,6 @@ class UserRead(UserBase):
     created_at: datetime
 
 class UserPublic(BaseModel):
-    """Minimal user info safe to expose publicly (e.g., as business owner)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -53,13 +52,11 @@ class UserPublic(BaseModel):
     
 
 class Token(BaseModel):
-    """JWT tokens returned after successful login."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
 class TokenPayload(BaseModel):
-    """Decoded JWT contents — used for validating incoming tokens."""
     sub: str | None = None
     type: str | None = None

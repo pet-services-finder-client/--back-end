@@ -13,7 +13,7 @@ from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
 from src.schemas.business_autocomplete import BusinessAutocompleteItem
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
-from src.core.deps import get_current_active_user
+from src.core.deps import get_current_active_user, get_current_verified_user
 from src.core.slug import generate_unique_business_slug
 from src.models.user import User
 from src.crud.business import (
@@ -160,7 +160,7 @@ async def list_businesses(
 async def create_business(
     payload: BusinessCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_verified_user)],
 ) -> Business:
     await validate_category(db, payload.category_id)
     animal_types = await validate_animal_types(db, payload.animal_type_ids)
