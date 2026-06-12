@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import List
  
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
  
  
@@ -14,7 +14,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
  
-    # Application
     APP_NAME: str = "Pawly"
     APP_ENV: str = "development"
     DEBUG: bool = True
@@ -22,6 +21,15 @@ class Settings(BaseSettings):
  
     # Database
     DATABASE_URL: str
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _normalize_postgres_url(cls, v: str) -> str:
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
  
     # JWT
     SECRET_KEY: str
@@ -29,7 +37,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
  
-    # CORS
     BACKEND_CORS_ORIGINS_RAW: str = ""
 
     @property
