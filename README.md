@@ -13,9 +13,11 @@ Database - PostgreSQL 16
 Migrations - Alembic
 Validation - Pydantic 2
 Auth - JWT via python-jose, bcrypt
+Email - Resend
 Admin panel - sqladmin
 Containerization - Docker + Docker Compose
-Testing - pytest, pytest-asyncio, httpx 
+Testing - pytest, pytest-asyncio, httpx
+Deployment - Render
 
 ## Quick Start
 
@@ -34,75 +36,91 @@ That's it. Open `http://localhost:8000/docs` for the Swagger UI.
 The admin panel is at `http://localhost:8000/admin`.
 
 ## Project Structure
-
+\'\'\'
 .
+
 ├── migrations/                       # Alembic migrations
+
 │   ├── versions/                     # Migration files (one per schema change)
+
 │   └── env.py                        # Alembic environment config
+
 ├── src/
+
 │   ├── api/v1/                       # API endpoints (route handlers)
-│   │   ├── auth.py                   # Registration, login, refresh, /me
+
+│   │   ├── auth.py                   # Registration, login, refresh, /me, email verification
+
 │   │   ├── animal_types.py           # GET list of animal types
+
 │   │   ├── pets.py                   # CRUD for user's pets
+
 │   │   ├── businesses.py             # Business search, detail, autocomplete, submission
+
 │   │   ├── business_categories.py    # GET list of business categories
+
 │   │   ├── services.py               # GET list of services (filter by category)
+
 │   │   ├── reviews.py                # Reviews CRUD (POST/GET/PATCH/DELETE)
+
 │   │   ├── admin.py                  # Admin endpoints (incl. review moderation)
+
 │   │   └── router.py                 # Aggregates all routers under /api/v1
+
 │   ├── admin/                        # sqladmin setup (admin panel at /admin)
-│   │   ├── auth.py                   # AdminAuth backend
-│   │   └── views.py                  # ModelView definitions
+
 │   ├── core/
+
 │   │   ├── config.py                 # Settings (loaded from env vars)
+
 │   │   ├── database.py               # Async engine, session factory, Base
-│   │   ├── security.py               # JWT encode/decode, bcrypt helpers
-│   │   └── deps.py                   # FastAPI deps (get_current_user, get_current_admin_user, get_db)
+
+│   │   ├── security.py               # JWT, bcrypt, token generation
+
+│   │   ├── email.py                  # Resend email senders
+
+│   │   └── deps.py                   # FastAPI deps (auth, verified-only, admin)
+
 │   ├── crud/                         # Query builders and business logic
-│   │   ├── business.py               # Search, validators, autocomplete, rating aggregation
-│   │   └── review.py                 # Review create/update/delete/list/hide/unhide
+
 │   ├── models/                       # SQLAlchemy ORM models
-│   │   ├── user.py
-│   │   ├── pet.py
-│   │   ├── animal_type.py
-│   │   ├── business.py
-│   │   ├── business_category.py
-│   │   ├── business_hours.py
-│   │   ├── service.py
-│   │   ├── review.py                 # Review with rating, text, is_hidden flag
-│   │   ├── password_reset_token.py
-│   │   ├── associations.py           # Junction tables (business_animal_types, business_services)
-│   │   ├── enums.py                  # PetGender, BusinessStatus
-│   │   └── __init__.py               # Imports all models for SQLAlchemy registry
+
 │   ├── schemas/                      # Pydantic schemas (request/response shapes)
-│   │   ├── user.py                   # UserRead, UserPublic, UserCreate
-│   │   ├── pet.py
-│   │   ├── animal_type.py
-│   │   ├── business.py               # BusinessRead with avg_rating, reviews_count
-│   │   ├── business_create.py        # User submission payload
-│   │   ├── business_update.py        # Partial update payload
-│   │   ├── business_list.py          # BusinessListItem, BusinessListResponse
-│   │   ├── business_autocomplete.py  # Lightweight schema for typeahead
-│   │   ├── business_category.py
-│   │   ├── business_hours.py
-│   │   ├── service.py
-│   │   └── review.py                 # ReviewCreate, ReviewRead, ReviewUpdate, ReviewAdminRead
+
 │   └── main.py                       # FastAPI app entrypoint, CORS, admin mount
-├── tests/                            # 90 tests using pytest + httpx
+
+├── tests/                            # 102 tests using pytest + httpx
+
 │   ├── conftest.py                   # Shared fixtures (db_session, client)
+
 │   ├── test_businesses.py            # Search, CRUD, ratings (51 tests)
+
 │   ├── test_reviews.py               # Review POST/GET/PATCH/DELETE (23 tests)
+
 │   ├── test_admin_reviews.py         # Admin hide/unhide + permissions (11 tests)
-│   └── test_review_model.py          # DB-level constraints (5 tests)
+
+│   ├── test_review_model.py          # DB-level constraints (5 tests)
+
+│   └── test_email_verification.py    # Email verification flow (12 tests)
+
 ├── data/                             # Reference data (xlsx files excluded from Git)
+
 ├── scripts/
+
 │   └── import_businesses.py          # CSV → DB import (123 Kyiv businesses)
+
 ├── docker-compose.yml
+
 ├── Dockerfile
+
 ├── alembic.ini
+
 ├── pytest.ini                        # pytest config (asyncio_mode=auto)
+
 ├── requirements.txt                  # Runtime deps
+
 ├── requirements-import.txt           # Optional deps for data import (pandas, openpyxl)
+
 └── README.md
 
 ## Architecture Overview
@@ -111,35 +129,48 @@ The admin panel is at `http://localhost:8000/admin`.
 
 ```
 ┌──────────┐       ┌──────────────┐
+
 │  users   │──────<│  businesses  │  ──────────┐
+
 └──────────┘       └──────────────┘            │
-     │                    │                    │
-     │                    │                    │
-     │                    ├─< business_hours   │
-     │                    │                    │
-     │                    ├─< business_animal_types  >─┐
-     │                    │                            │
-     │                    ├─< business_services        │
-     │                    │                            │
-     │                    └─→ business_categories      │
-     │                            │                    │
-     │                            └─< services         │
-     │                                                 │
-     └─< pets ─→ animal_types <───────────────────────┘
+
+│                    │                    │
+
+│                    ├─< business_hours   │
+
+│                    ├─< business_animal_types  >─┐
+
+│                    ├─< business_services        │
+
+│                    ├─< reviews                  │
+
+│                    └─→ business_categories      │
+
+│                            └─< services         │
+
+│                                                 │
+
+├─< pets ─→ animal_types <───────────────────────┘
+
+├─< password_reset_tokens
+
+└─< email_verification_tokens
 ```
 
 **Cardinality:**
 - `User` 1:m `Pet` (a user owns multiple pets)
 - `User` 1:m `Business` (a user can propose multiple businesses, becomes the owner)
+- `User` 1:m `Review` (a user can review many businesses)
 - `Business` n:1 `BusinessCategory` (each business belongs to one category)
 - `Business` 1:m `BusinessHours` (one row per day of the week per business)
+- `Business` 1:m `Review` (a business has many reviews)
 - `Business` n:m `AnimalType` (via `business_animal_types` junction)
 - `Business` n:m `Service` (via `business_services` junction)
-- `Service` n:1 `BusinessCategory` (each service belongs to one category)
+- `Service` n:1 `BusinessCategory`
 - `Pet` n:1 `AnimalType`
 
 **Cascade rules:**
-- `User` deleted → their `Pet` and `Business` records deleted (CASCADE)
+- `User` deleted → their `Pet`, `Business`, `Review`, and token records deleted (CASCADE)
 - `BusinessCategory` cannot be deleted while businesses reference it (RESTRICT)
 - `AnimalType` cannot be deleted while pets/businesses reference it (RESTRICT)
 
@@ -165,7 +196,9 @@ Public endpoints (`GET /businesses`, `GET /businesses/{id}`) only return `status
 
 ## API Documentation
 
-Live API docs: `http://localhost:8000/docs`
+Live API docs:
+- Production: `https://api.pawlyapp.me/docs`
+- Local: `http://localhost:8000/docs`
 
 ### Public endpoints
 
@@ -333,7 +366,6 @@ Copy `.env.example` to `.env` and adjust:
 
 ## Roadmap
 
-
 ### Completed
 
 - **Auth** — registration, login, JWT tokens, current user endpoint
@@ -345,13 +377,11 @@ Copy `.env.example` to `.env` and adjust:
 - **Business write API** — user-submitted proposals with pending → approved/rejected admin moderation
 - **Autocomplete** — `GET /businesses/autocomplete` for typeahead UI
 - **Reviews epic** — full CRUD on reviews (POST/GET/PATCH/DELETE), admin hide/unhide moderation, `avg_rating` and `reviews_count` integrated into Business responses
-
 - **Email verification** — verify user email after registration
 - **Search ranking** — sort businesses by distance when geo params are provided
 - **Postgres FTS** — full-text search with relevance instead of ILIKE
 - **Region/city filtering** — pending product decision (Kyiv + Kyiv Oblast handling)
-- **Google ratings integration** — hybrid display of Pawly + Google ratings on business detail (~10 SP, requires Google Places API + caching strategy)
-- **Render deployment** — production deploy with custom domain, SSL, automatic deploy from Git
+- **Render deployment** — production backend at `https://api.pawlyapp.me` with custom domain, SSL, automatic deploy from `develop`
 
 ## Architectural Decisions
 
@@ -474,5 +504,3 @@ Inside the container, the database is at `db:5432`, not `localhost:5432`. The `D
 ## Author
 
 Anastasiia Tarasenko — backend developer
-
-For questions, ping me on Slack or open an issue.
