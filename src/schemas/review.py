@@ -1,0 +1,69 @@
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ReviewBase(BaseModel):
+    """Shared fields between create and read schemas."""
+
+    rating: int = Field(ge=1, le=5, description="Star rating from 1 to 5")
+    text: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Optional review text — users can star-rate without writing",
+    )
+
+
+class ReviewCreate(ReviewBase):
+    """Payload for POST /businesses/{business_id}/reviews."""
+
+
+class ReviewAuthor(BaseModel):
+    """Minimal author info shown alongside a review. """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    full_name: str | None
+
+
+class ReviewRead(ReviewBase):
+    """Public review representation returned by GET endpoints."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    business_id: int
+    author: ReviewAuthor
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReviewListResponse(BaseModel):
+    """Pagination"""
+    items: list[ReviewRead]
+    total: int
+    limit: int
+    offset: int
+
+class ReviewUpdate(BaseModel):
+    """Payload for PATCH /reviews/{id} — all fields optional."""
+    rating: int | None = Field(default=None, ge=1, le=5)
+    text: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewAdminRead(ReviewRead):
+    """Admin view of a review — includes the is_hidden moderation flag.
+
+    Inherits all public fields from ReviewRead and adds is_hidden, which
+    admins need to see (so the moderation UI can show which reviews are
+    currently hidden vs visible).
+    """
+
+    is_hidden: bool
+
+
+class ReviewAdminListResponse(BaseModel):
+    """Paginated list of all reviews for admin moderation."""
+
+    items: list[ReviewAdminRead]
+    total: int
+    limit: int
+    offset: int

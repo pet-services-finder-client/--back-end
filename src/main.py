@@ -2,8 +2,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqladmin import Admin
+from starlette.middleware.sessions import SessionMiddleware
 
+from src.admin.auth import AdminAuth
+from src.api.v1.router import api_router
 from src.core.config import settings
+from src.core.database import engine
 
 
 @asynccontextmanager
@@ -22,6 +27,8 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Required by sqladmin to store login state in a cookie
+app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(
@@ -31,6 +38,8 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+app.include_router(api_router, prefix=settings.API_V1_PREFIX) 
 
 
 @app.get("/")
@@ -45,3 +54,27 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+admin = Admin(
+    app,
+    engine,
+    authentication_backend=AdminAuth(secret_key=settings.SECRET_KEY),
+    base_url="/admin",
+    title="Pawly Admin",
+)
+
+# Register admin views
+##deliberately at the end, rather than at the top of the file. Why: to avoid circular imports.
+from src.admin.views import (
+    AnimalTypeAdmin,
+    BusinessAdmin,  
+    BusinessCategoryAdmin,
+    ServiceAdmin,
+    UserAdmin,
+)
+admin.add_view(UserAdmin)
+admin.add_view(AnimalTypeAdmin)
+admin.add_view(BusinessAdmin)
+admin.add_view(BusinessCategoryAdmin)
+admin.add_view(ServiceAdmin)
