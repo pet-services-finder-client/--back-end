@@ -11,7 +11,7 @@ from src.schemas.business_update import BusinessUpdate
 from src.models.enums import BusinessStatus
 from src.models.business_hours import BusinessHours
 from src.schemas.business import BusinessRead
-from src.schemas.business_autocomplete import BusinessAutocompleteItem
+from src.schemas.business_autocomplete import AutocompleteItem
 from src.schemas.business_list import BusinessListItem, BusinessListResponse
 from src.core.deps import get_current_active_user, get_current_verified_user
 from src.core.slug import generate_unique_business_slug
@@ -21,6 +21,7 @@ from src.crud.business import (
     compute_ratings_for_businesses,
     load_business_with_relations,
     search_businesses_for_autocomplete,
+    search_services_for_autocomplete,
     validate_animal_types,
     validate_category,
     validate_services,
@@ -309,7 +310,7 @@ async def delete_business(
 
 @router.get(
     "/autocomplete",
-    response_model=list[BusinessAutocompleteItem],
+    response_model=list[AutocompleteItem],
 )
 async def autocomplete_businesses(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -325,17 +326,32 @@ async def autocomplete_businesses(
         int,
         Query(ge=1, le=20, description="Max suggestions to return"),
     ] = 10,
-) -> list[BusinessAutocompleteItem]:
-    rows = await search_businesses_for_autocomplete(db, q, limit)
-    return [
-        BusinessAutocompleteItem(
+) -> list[AutocompleteItem]:
+    business_rows = await search_businesses_for_autocomplete(db, q, limit)
+    service_rows = await search_services_for_autocomplete(db, q, limit)
+
+    items = [
+        AutocompleteItem(
+            type="business",
             id=business.id,
             name=business.name,
             slug=business.slug,
             category_slug=category_slug,
         )
-        for business, category_slug in rows
+        for business, category_slug in business_rows
+    ] + [
+        AutocompleteItem(
+            type="service",
+            id=service.id,
+            name=service.name,
+            slug=service.slug,
+            category_slug=category_slug,
+        )
+        for service, category_slug in service_rows
     ]
+
+    return sorted(items, key=lambda item: item.name)[:limit]
+
 
 
 @router.get("/{business_id}", response_model=BusinessRead)

@@ -218,6 +218,25 @@ async def search_businesses_for_autocomplete(
     result = await db.execute(stmt)
     return list(result.all())
 
+async def search_services_for_autocomplete(
+    db: AsyncSession,
+    query: str,
+    limit: int,
+) -> list[tuple[Service, str]]:
+    pattern = f"{query}%"
+    stmt = (
+        select(Service, BusinessCategory.slug)
+        .join(BusinessCategory, Service.category_id == BusinessCategory.id)
+        .where(
+            Service.is_active.is_(True),
+            Service.name.ilike(pattern),
+        )
+        .order_by(Service.name)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.all())
+
 async def compute_ratings_for_businesses(
     db: AsyncSession,
     business_ids: list[int],
