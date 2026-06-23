@@ -15,6 +15,8 @@ TABLES = [
     "animal_types",
     "reviews",
     "pets",
+    "business_animal_types",
+    "business_services",
 ]
 
 
